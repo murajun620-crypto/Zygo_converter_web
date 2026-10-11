@@ -1,4 +1,4 @@
-import {renderExamples} from './help-examples.js';
+import {renderExamples} from './help-examples.js?v=scratches-1';
 
 export const topics = {
   surface: ['表面マップ・3D形状',
