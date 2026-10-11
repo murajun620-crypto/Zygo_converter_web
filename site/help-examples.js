@@ -3,6 +3,7 @@ import {spectrum2D, extractProfile, filterSurface, heightDistribution, bandRMS} 
 
 // Educational surfaces are generated locally and use the same numerical routines as DAT analysis.
 export const COLS = 320, ROWS = 240, DX = 2.5, SCRATCH_DX = 1.25;
+export const SCRATCH_COUNT = 60;
 export const CX=COLS/2*DX,CY=ROWS/2*DX,FLAT_RADIUS=ROWS*DX*.1875;
 const geometries=new WeakMap();
 function withGeometry(data,dx=DX){geometries.set(data,{cols:COLS,rows:ROWS,dx,spanX:(COLS-1)*dx,spanY:(ROWS-1)*dx});return data;}
@@ -24,7 +25,7 @@ export function scratchFeatures(id) {
   if(!Object.hasOwn(directions,id))throw new Error(`Unknown scratch case: ${id}`);
   let seed=76043;
   const uniform=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return (seed+.5)/4294967296;};
-  return Array.from({length:18},()=>{
+  return Array.from({length:SCRATCH_COUNT},()=>{
     const x=(COLS-1)*SCRATCH_DX*uniform(),y=(ROWS-1)*SCRATCH_DX*uniform(),depth=4+10*uniform(),sigma=.9+.4*uniform(),length=110+90*uniform(),phase=TAU*uniform(),u=uniform();
     return {x,y,depth,sigma,length,phase,angle:directions[id]===null?180*u:directions[id]+20*(u-.5)};
   });
@@ -42,6 +43,12 @@ const scratches=Object.fromEntries(scratchIds.map(id=>{
   }),SCRATCH_DX);
   return [id,data];
 }));
+// Share the full measured height range across orientations, rounded outwards in nm.
+export const scratchHeightRange=Object.freeze((()=>{
+  let min=Infinity,max=-Infinity;
+  for(const data of Object.values(scratches))for(const z of data){min=Math.min(min,z);max=Math.max(max,z);}
+  return [Math.floor(min),Math.ceil(max)];
+})());
 export const cases = {
   flat: ['凹凸のない平坦面', () => 0],
   short: ['20 µm間隔の縦筋', (x) => wave(x,20)],
@@ -198,12 +205,12 @@ export function renderExamples(topic,host) {
       const directional=id!=='scratch-random',py=examplePSD(data,'y','hann');
       const direction={'scratch-vertical':'垂直（90°）','scratch-horizontal':'水平（0°）','scratch-diagonal':'斜め（45°）'}[id];
       text=directional?`${direction}を中心に角度が約±10°ばらつく傷です。傷を横切る方向では高さが大きく変わり、FFTには傷と直交する方向に広がった帯が現れます。傷の間隔は一定ではないため、等間隔の筋のような鋭い周期ピークにはなりません。`:'方向も深さもランダムな傷です。FFTのパワーは多方向に広がりますが、傷の本数が有限で交差・配置にも偏りがあるため、完全な円対称や角度集中度0にはなりません。';
-      note.textContent='研磨スクラッチを模した合成データ（実測ではありません）。320 × 240点、間隔1.25 µm、Jet表示。18本の細いガウス形の溝。各溝の公称深さ4〜14 nm、半値全幅約2.1〜3.1 µm、長さ110〜200 µm。深さは溝に沿っても±10%変化し、端はなだらか。交差部は溝を足すため個々の深さより深くなります。4例は位置・深さ・幅・長さ・背景を共通にし、方向だけを変更。モデルは研磨過程の再現ではありません。';
+      note.textContent=`研磨スクラッチを模した合成データ（実測ではありません）。320 × 240点、間隔1.25 µm、Jet表示。${SCRATCH_COUNT}本の細いガウス形の溝。各溝の公称深さ4〜14 nm、半値全幅約2.1〜3.1 µm、長さ110〜200 µm。深さは溝に沿っても±10%変化し、端はなだらか。交差部は溝を足すため個々の深さより深くなります。4例は位置・深さ・幅・長さ・背景を共通にし、方向だけを変更。高さの色範囲は4例の全画素のmin〜maxを1 nm刻みで外側に丸めた共通Auto（${scratchHeightRange[0]}〜${scratchHeightRange[1]} nm）。モデルは研磨過程の再現ではありません。`;
       if(topic==='compare'){
         const ref=exampleSurface('scratch-vertical');text='垂直に偏った傷を基準に、方向の違いを比較します。個々の溝の深さなどは共通でも、交差と測定領域の切り取り方でSq・PVは変わります。同じSqを仮定せず、表示された値とPSDを比較しましょう。';
-        surface('① 基準：垂直に偏った傷',ref,statsText(ref),{limit:40});surface('② 選択した傷の面',data,statsText(data),{limit:40});psds('③ X方向のPSDを比較',[psdSeries(examplePSD(ref,'x','hann')),psdSeries(p)],'緑 = 垂直の傷、橙 = 選択例。同じHann窓・測定幅・画素間隔。方向別のPSDなので、X方向だけで等方性を決めません。');
+        surface('① 基準：垂直に偏った傷',ref,statsText(ref),{range:scratchHeightRange});surface('② 選択した傷の面',data,statsText(data),{range:scratchHeightRange});psds('③ X方向のPSDを比較',[psdSeries(examplePSD(ref,'x','hann')),psdSeries(p)],'緑 = 垂直の傷、橙 = 選択例。同じHann窓・測定幅・画素間隔。方向別のPSDなので、X方向だけで等方性を決めません。');
       }else{
-        surface('① スクラッチのある表面',data,`${statsText(data)}。4例で高さの色範囲は±40 nm共通。${topic==='profile'?'緑 = X、橙 = Y、紫 = 任意線。':''}`,{limit:40,lines:topic==='profile'});
+        surface('① スクラッチのある表面',data,`${statsText(data)}。高さは共通Auto ${scratchHeightRange[0]}〜${scratchHeightRange[1]} nm（4例の全点を含む）。${topic==='profile'?'緑 = X、橙 = Y、紫 = 任意線。':''}`,{range:scratchHeightRange,lines:topic==='profile'});
         if(['surface','profile'].includes(topic))profiles('② 3方向の断面を比較',['x','y','arbitrary'].map((d,i)=>({...profile(data,d),color:colors[i]})),'緑 = X ／ 橙 = Y ／ 紫 = 斜め。横軸は実距離。深さや間隔は傷ごとに異なり、切る場所によって見える谷も変わります。');
         if(['fft','psd','xy','radial','stats','window','band','cumulative'].includes(topic)){
           const s=fftPanel(grid,data,id);
