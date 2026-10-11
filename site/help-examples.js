@@ -47,8 +47,8 @@ const scratches=Object.fromEntries(scratchIds.map(id=>{
 export const scratchHeightRange=Object.freeze([-15,15]);
 export const cases = {
   flat: ['凹凸のない平坦面', () => 0],
-  short: ['20 µm間隔の縦筋', (x) => wave(x,20)],
-  long: ['40 µm間隔の縦筋', (x) => wave(x,40)],
+  short: ['100 µm間隔の縦筋', (x) => wave(x,100)],
+  long: ['200 µm間隔の縦筋', (x) => wave(x,200)],
   horizontal: ['20 µm間隔の横筋', (x,y) => wave(y,20)],
   diagonal: ['斜め45°の筋（間隔28.3 µm）', (x,y) => 3*Math.cos(TAU*(x+y)/40)],
   random: ['方向のないランダムな凹凸', (x,y,i) => random[i]],
@@ -60,7 +60,7 @@ export const cases = {
   bowl: ['曲がった面＋20 µmの筋', (x,y) => .002*((x-CX)**2+(y-CY)**2)+wave(x,20)],
   mixed: ['80 µmのうねり＋20 µmの筋', x => wave(x,80)+wave(x,20,1.5)],
   leakage: ['測定幅に収まらない23 µm周期', x => wave(x,23)],
-  gap: ['20 µmの筋＋測れていない帯', x => x>=CX-10&&x<CX+10?NaN:wave(x,20)],
+  gap: ['100 µmの筋＋測れていない帯', x => x>=CX-10&&x<CX+10?NaN:wave(x,100)],
   tall: ['振幅6 nm・20 µmの筋', x => wave(x,20,6)],
   'scratch-vertical':['垂直に偏ったスクラッチ（角度・深さにばらつき）',(x,y,i)=>scratches['scratch-vertical'][i]],
   'scratch-horizontal':['水平に偏ったスクラッチ（角度・深さにばらつき）',(x,y,i)=>scratches['scratch-horizontal'][i]],
@@ -83,11 +83,11 @@ export function exampleHighPass(data) {
   const {cols,rows,dx}=exampleGeometry(data);return withGeometry(filterSurface(data,cols,rows,dx,{filter:'highpass',cutoffLow:1/40,rolloff:'gaussian',edge:'periodic'}),dx);
 }
 export const groups = {
-  surface:['flat','short','diagonal','random','pit'], profile:['short','horizontal','diagonal','pit'],
-  intensity:['flat'], slope:['short','horizontal','diagonal'], stats:['short','long','random','pit'],
+  surface:['flat','short','long','diagonal','random','pit'], profile:['short','long','horizontal','diagonal','pit'],
+  intensity:['flat'], slope:['short','long','horizontal','diagonal'], stats:['short','long','random','pit'],
   form:['tilt','bowl'], filter:['mixed'], psd:['short','long','random','pit'],
-  window:['leakage','gap'], clip:['tall'], fft:['short','horizontal','diagonal','random'],
-  radial:['short','random'], xy:['short','horizontal','diagonal','random'],
+  window:['leakage','gap'], clip:['tall'], fft:['short','long','horizontal','diagonal','random'],
+  radial:['short','long','random'], xy:['short','long','horizontal','diagonal','random'],
   cumulative:['mixed','short','long'], distribution:['random','valley','flat-valley','peak'],
   band:['mixed','short','long'], compare:['long','random']
 };
@@ -232,9 +232,9 @@ export function renderExamples(topic,host) {
     }
     else if(topic==='surface'){note.textContent='説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Jet表示。図の数値はアプリと同じ解析処理で計算します。';text=id==='flat'?'平らなら全点が同じ色。周期的な筋は縞、ランダムな凹凸はまだら、局所的な谷は小さな斑点になります。':'色の並びから凹凸の位置と広がりを見て、断面で実際の高さを確かめましょう。';surface();profiles('② X方向で切った断面',[profile(data)],'Y = 300 µmを通る横線。深い谷も、この線が谷を通らなければ見えません。');}
     else if(topic==='profile'){text='切る方向で見える周期が変わります。筋を横切る線では波が現れ、筋に沿う線では高さがほぼ変わりません。';surface('① 切る位置・向き',data,'緑 = X方向、橙 = Y方向、紫 = 斜めの任意線。',{lines:true});profiles('② 3方向の断面を重ねる',['x','y','arbitrary'].map((d,i)=>({...profile(data,d),color:colors[i]})),'緑：X ／ 橙：Y ／ 紫：任意。横軸は各線の始点からの実距離。斜め線は長くなります。');}
-    else if(topic==='psd'){text=id==='short'||id==='long'?`筋の間隔が${id==='short'?20:40} µmなら、同じ波長にPSDの山が現れます。20と40 µmの例はSqが同じでもピーク位置が違います。`:'周期が一定でない面は、PSDが広い波長に分布します。局所的な谷も一つの周期だけでは表せません。';surface();profiles('② X方向の断面',[profile(data)],'周期と高さを目で確かめます。');psds('③ X方向の標準PSD',[psdSeries(p)],'矩形窓・各ラインの平均除去。横軸は波長、縦軸は周波数に対する密度。');}
+    else if(topic==='psd'){text=id==='short'||id==='long'?`筋の間隔が${id==='short'?100:200} µmなら、同じ波長にPSDの山が現れます。100と200 µmの例はSqが同じでもピーク位置が違います。`:'周期が一定でない面は、PSDが広い波長に分布します。局所的な谷も一つの周期だけでは表せません。';surface();profiles('② X方向の断面',[profile(data)],'周期と高さを目で確かめます。');psds('③ X方向の標準PSD',[psdSeries(p)],'矩形窓・各ラインの平均除去。横軸は波長、縦軸は周波数に対する密度。');}
     else if(topic==='fft'||topic==='radial'||topic==='xy'){text='筋の向きと、凹凸が繰り返す向きは90°違います。縦筋の例ではX方向だけに高さが変化します。';surface();const s=fftPanel(grid,data);if(topic==='radial')psdPanel(grid,'③ 方向をまとめた放射平均',[{x:Float64Array.from(s.frequencies,f=>1/f),y:s.radial}],'同じ半径の2D PSDを平均。方向情報が消えるため、2D画像と併せて判断します。','2D PSD [nm²·µm²]');if(topic==='xy')psds('③ X / Yの標準PSD',[psdSeries(p),psdSeries(examplePSD(data,'y'))],'緑 = X、橙 = Y。高さが変化しない方向のPSDは0（表示下限）です。');}
-    else if(topic==='stats'){const a=exampleSurface('short');text='Sqは凹凸の大きさを一つの値にまとめます。同じSqでも、筋の間隔や傷の形は違うことがあります。PVは小さな領域の深い傷にも敏感です。';surface('① 比較基準：20 µmの筋',a,statsText(a),{limit:20});surface('② 選択した表面',data,statsText(data),{limit:20});psds('③ 同じSqでもPSDは変わる',[psdSeries(examplePSD(a)),psdSeries(p)],'緑 = 基準、橙 = 選択例。局所的な谷はPVが大きくても、全面のSqは小さくなる場合があります。');}
+    else if(topic==='stats'){const a=exampleSurface('short');text='Sqは凹凸の大きさを一つの値にまとめます。同じSqでも、筋の間隔や傷の形は違うことがあります。PVは小さな領域の深い傷にも敏感です。';surface('① 比較基準：100 µmの筋',a,statsText(a),{limit:20});surface('② 選択した表面',data,statsText(data),{limit:20});psds('③ 同じSqでもPSDは変わる',[psdSeries(examplePSD(a)),psdSeries(p)],'緑 = 基準、橙 = 選択例。局所的な谷はPVが大きくても、全面のSqは小さくなる場合があります。');}
     else if(topic==='form'){const corrected=exampleCorrection(data,id==='tilt'?'plane':'sphere');text=id==='tilt'?'設置の傾きを差し引くと、小さな筋が読みやすくなります。筋もフィットに少し寄与するため、補正後が元の正弦波と完全一致するとは限りません。':'浅い曲面を2次近似で差し引きます。実際のうねりも差し引かれるため、補正条件を揃えて比較しましょう。';surface('① 補正前',data,`${statsText(data)}。色範囲はこの図のAuto。`);surface('② 補正後',corrected,`${statsText(corrected)}。色範囲はこの図のAuto。`);profiles('③ 補正前後の断面',[profile(data),profile(corrected)],'緑 = 補正前、橙 = 補正後。同じ位置・同じ高さ軸で比較。マップの色範囲は各図のカラーバーで確認します。');}
     else if(topic==='filter'){const filtered=exampleHighPass(data);text='カットオフ40 µmのHigh Passで、80 µmのうねりが弱くなり、20 µmの筋が残ります。Gaussianなので境界で一気には切れません。';surface('① 元の表面',data,statsText(data),{limit:4.5});surface('② High Pass後',filtered,statsText(filtered),{limit:4.5});psds('③ どの波長が弱くなったか',[psdSeries(p),psdSeries(examplePSD(filtered))],'緑 = 元の面、橙 = フィルター後。周期境界の説明例。アプリで同じ比較をするにはPSD入力を「マップと同じ補正後」にします。');}
     else if(topic==='window'){surface();if(id==='leakage'){text='23 µmの波は800 µmの測定周期に整数回収まらず、端がつながりません。Hann窓は遠い波長への漏れを抑えますが、山の周辺を広げます。';psds('② 矩形窓とHann窓',[psdSeries(p),psdSeries(examplePSD(data,'x','hann'))],'緑 = 矩形窓、橙 = Hann窓。ピーク高さだけを比べず、窓の条件を揃えます。');}else {text='帯状の欠損では全てのXラインに穴があるため、ライン除外では使えるXラインが0本です。補間しても失われた周期を正確には復元できません。';psds('② 欠損なしと線形補間',[psdSeries(examplePSD(exampleSurface('short'))),psdSeries(p)],'緑 = 欠損なし、橙 = 欠損を直線で補間。欠損が人工的な周期成分を作ります。');}}
@@ -246,7 +246,7 @@ export function renderExamples(topic,host) {
       surface();distributionPanels(grid,data);
     }
     else if(topic==='band'||topic==='cumulative'){text='長い波長から短い波長へ足すと、含まれる凹凸のRMSが増えます。波長表示では右から左へ読みます。';surface();psds('② どの波長が寄与するか',[psdSeries(p)],`10–30 µm帯：${fmt(bandRMS(p,10,30).rms)} nm ／ 40–100 µm帯：${fmt(bandRMS(p,40,100).rms)} nm。矩形窓。`);panel(grid,'③ 累積RMS（右 → 左）','周波数の刻み幅Δfを掛けて積分。波長の刻み幅は使いません。',c=>curve(c,[cumulative(p)],{xlabel:'空間波長 [µm] · 右から左へ',ylabel:'累積RMS [nm]',xrange:[0,1/p.df]}));}
-    else if(topic==='compare'){const a=exampleSurface('short');text='この2面はどちらもSq ≈ 2.12 nmですが、筋の間隔や周期の揃い方が違います。粗さの数値に加えてPSDやマップを見ると、その違いが分かります。';surface('① 試料A：20 µmの筋',a,statsText(a),{limit:7});surface('② 試料B：選択例',data,statsText(data),{limit:7});psds('③ 試料のPSDを比較',[psdSeries(examplePSD(a)),psdSeries(p)],'緑 = A、橙 = B。同じ測定幅・画素間隔・矩形窓で比較。');}
+    else if(topic==='compare'){const a=exampleSurface('short');text='この2面はどちらもSq ≈ 2.12 nmですが、筋の間隔や周期の揃い方が違います。粗さの数値に加えてPSDやマップを見ると、その違いが分かります。';surface('① 試料A：100 µmの筋',a,statsText(a),{limit:7});surface('② 試料B：選択例',data,statsText(data),{limit:7});psds('③ 試料のPSDを比較',[psdSeries(examplePSD(a)),psdSeries(p)],'緑 = A、橙 = B。同じ測定幅・画素間隔・矩形窓で比較。');}
     if(topic==='band')frequencyPanel(grid,data,scratch);
     takeaway.textContent=text;
     if(!scratch&&['psd','fft','radial','xy','stats','filter','window','clip','band','cumulative','compare'].includes(topic))grid.append(element('p','説明図は、特記した例を除き平均除去＋矩形窓を使用。アプリ初期設定のHann窓ではピークの幅と高さが変わります。対数図の描画下限は最大値の10⁻⁸（計算値は変更しません）。','example-note example-full'));
