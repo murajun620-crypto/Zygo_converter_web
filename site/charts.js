@@ -117,7 +117,7 @@ export function seriesChart(canvas, series, {xlabel='Distance along line [µm]',
   named.forEach((s,i)=>{const x=65+(i%3)*280,y=537+Math.floor(i/3)*22;c.setLineDash([]);line(c,x,y-4,x+25,y-4,s.color??palette[i%palette.length]);c.setLineDash([]);text(c,s.name.length>32?s.name.slice(0,30)+'…':s.name,x+34,y);});
 }
 export function histogramChart(canvas,distribution) {
-  const c=setup(canvas),[xmin,xmax]=bounds(distribution.centers),ymax=Math.max(...distribution.counts)*1.1||1,f=frame(c,{xmin,xmax,ymin:0,ymax,xlabel:'Height before clipping [nm]',ylabel:'Pixel count'}),step=distribution.centers.length>1?distribution.centers[1]-distribution.centers[0]:1;
+  const c=setup(canvas),step=distribution.centers.length>1?distribution.centers[1]-distribution.centers[0]:1,xmin=distribution.centers[0]-step/2,xmax=distribution.centers.at(-1)+step/2,ymax=Math.max(...distribution.counts)*1.1||1,f=frame(c,{xmin,xmax,ymin:0,ymax,xlabel:'Height before clipping [nm]',ylabel:'Pixel count'});
   c.save();c.beginPath();c.rect(f.left,f.top,f.w,f.h);c.clip();c.fillStyle=teal;for(let k=0;k<distribution.counts.length;k++){const x=f.X(distribution.centers[k]-step/2),w=Math.max(1,f.X(distribution.centers[k]+step/2)-x-1),y=f.Y(distribution.counts[k]);c.fillRect(x,y,w,f.top+f.h-y);}c.restore();
 }
 
