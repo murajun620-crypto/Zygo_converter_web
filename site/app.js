@@ -1,6 +1,6 @@
 import {hitLine, dragLine, frameQueue} from './interaction.js';
 import {datFiles, installFileDrop} from './upload.js';
-import {installHelp} from './help.js?v=thin-jet-1';
+import {installHelp} from './help.js?v=examples-320-1';
 import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=auto-color-1';
 import {MAX_PIXELS} from './analysis.js';
 import {extractProfile, bandRMS} from './advanced.js';
@@ -35,7 +35,7 @@ function buttons() {
   document.querySelectorAll('[data-png], #profileExcel, #psdExcel, #compareExcel, #researchExcel, #fftCSV, #addProfile').forEach(b => b.disabled = busy || exporting || !results.length);
 }
 function startWorker() {
-  worker = new Worker(new URL('./worker.js', import.meta.url), {type: 'module'});
+  worker = new Worker(new URL('./worker.js?v=examples-320-1', import.meta.url), {type: 'module'});
   worker.onmessage = ({data}) => {if (pending && pending.id === data.id) {const p = pending; pending = null; data.error ? p.reject(new Error(data.error)) : p.resolve(data.result);}};
   worker.onerror = event => {if (pending) {pending.reject(new Error(event.message || '解析 Worker の起動に失敗しました。')); pending = null;} worker.terminate(); worker = null;};
 }

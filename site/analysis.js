@@ -170,7 +170,7 @@ export function slope(data, cols, rows, direction, dx = 1, legacy = false) {
 }
 
 export function syntheticDat() {
-  const cols = 128, rows = 96, dx = 2.5, phase = new Float64Array(cols * rows), intensity = new Float64Array(cols * rows);
+  const cols = 320, rows = 240, dx = 2.5, phase = new Float64Array(cols * rows), intensity = new Float64Array(cols * rows);
   for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {const i = y * cols + x; phase[i] = 4 * Math.sin(2 * Math.PI * 8 * x / cols) + 2 * Math.cos(2 * Math.PI * 5 * y / rows) + 0.05 * x + 0.025 * y; intensity[i] = 170 + 35 * Math.sin(x / 12) * Math.cos(y / 18);}
   return {name: 'DEMO · 合成表面', cols, rows, dx, phase, intensity, iw: cols, ih: rows, meta: {format: 'synthetic', wavelength_nm: 632.8, valid: phase.length, total: phase.length, timestamp: 0}};
 }
