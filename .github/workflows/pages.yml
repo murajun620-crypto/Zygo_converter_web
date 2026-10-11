@@ -29,7 +29,7 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import {readdir, lstat} from 'node:fs/promises';
-          const allowed = ['index.html','style.css','app.js','analysis.js','advanced.js','charts.js','export.js','worker.js','interaction.js','upload.js','help.js','help-examples.js'].sort();
+          const allowed = ['index.html','style.css','app.js','analysis.js','advanced.js','charts.js','export.js','worker.js','interaction.js','upload.js','help.js','help-examples.js','fft-view.js'].sort();
           const actual = (await readdir('site')).sort();
           if (JSON.stringify(actual) !== JSON.stringify(allowed)) throw Error('Unexpected public asset');
           for (const name of actual) if (!(await lstat(`site/${name}`)).isFile()) throw Error('Only regular app files may be deployed');

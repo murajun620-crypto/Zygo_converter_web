@@ -1,4 +1,5 @@
 import {slope} from './analysis.js';
+import {spectrumBounds,ringVisibility} from './fft-view.js';
 const ink = '#526174', grid = '#e7edf2', teal = '#137c80';
 export const palette = ['#137c80', '#b36f31', '#725ab5', '#d35173', '#3d74aa', '#7b8f39'];
 export function setup(canvas, width = 900, height = 540) {
@@ -120,4 +121,41 @@ export function drawProfileLines(canvas, lines) {
   for(const q of lines){c.lineWidth=1.8*scale;line(c,X(q.x0),Y(q.y0),X(q.x1),Y(q.y1),'#ffffffb0');c.lineWidth=0.9*scale;line(c,X(q.x0),Y(q.y0),X(q.x1),Y(q.y1),q.color??teal);text(c,q.name??'',X(q.x0)+4,Y(q.y0)-7,'left',q.color??teal);
     if(q.direction==='arbitrary'||(q.x0!==q.x1&&q.y0!==q.y1)){c.fillStyle=q.color??teal;for(const [x,y] of [[q.x0,q.y0],[q.x1,q.y1]]){c.beginPath();c.arc(X(x),Y(y),2.5*scale,0,Math.PI*2);c.fill();}}
   }c.restore();
+}
+
+const fftNumber=v=>v===0?'0':Math.abs(v)<.001||Math.abs(v)>=1e4?v.toExponential(2):Number(v.toFixed(4)).toString();
+export function fftMap(canvas,s,display,{view,wavelengths=[],colormap='viridis',unit='log₁₀(nm²·µm²)',label='2D PSD'}={}) {
+  const c=setup(canvas,900,600),cols=s.fx.length,rows=s.fy.length,full=spectrumBounds(s);
+  const maxW=685,maxH=390,spanX=view.xmax-view.xmin,spanY=view.ymax-view.ymin,scale=Math.min(maxW/spanX,maxH/spanY),w=spanX*scale,h=spanY*scale,left=75+(maxW-w)/2,top=35+(maxH-h)/2;
+  const X=x=>left+(x-view.xmin)*scale,Y=y=>top+(view.ymax-y)*scale;
+  const off=document.createElement('canvas');off.width=cols;off.height=rows;const cc=off.getContext('2d'),pixels=cc.createImageData(cols,rows);
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){const rgb=color(display.values[(rows-1-y)*cols+x],display.min,display.max,false,colormap);pixels.data.set([...rgb,255],4*(y*cols+x));}cc.putImageData(pixels,0,0);
+  // Crop source bin cells at their real frequency edges; nearest-neighbour rendering only.
+  const xmin=Math.max(view.xmin,full.xmin),xmax=Math.min(view.xmax,full.xmax),ymin=Math.max(view.ymin,full.ymin),ymax=Math.min(view.ymax,full.ymax);
+  c.imageSmoothingEnabled=false;
+  if(xmin<xmax&&ymin<ymax)c.drawImage(off,(xmin-full.xmin)/s.dfX,(full.ymax-ymax)/s.dfY,(xmax-xmin)/s.dfX,(ymax-ymin)/s.dfY,X(xmin),Y(ymax),(xmax-xmin)*scale,(ymax-ymin)*scale);
+  c.save();c.beginPath();c.rect(left,top,w,h);c.clip();
+  const cssWidth=canvas.getBoundingClientRect?.().width||canvas.width,screenScale=canvas.width/cssWidth;
+  const visibleRings=wavelengths.filter(lambda=>ringVisibility(view,lambda));
+  for(const lambda of visibleRings){
+    const radius=scale/lambda;
+    for(const [stroke,width] of [['#243346aa',1.8],['#ffffffd9',.7]]){c.strokeStyle=stroke;c.lineWidth=width*screenScale;c.beginPath();c.arc(X(0),Y(0),radius,0,2*Math.PI);c.stroke();}
+  }c.restore();
+  c.font='13px sans-serif';c.strokeStyle='#c7d2db';c.strokeRect(left,top,w,h);
+  const symmetric=view.mode!=='full';
+  for(let k=0;k<=4;k++){const t=k/4,x=symmetric?view.xmin+t*spanX:s.fx[0]+t*(s.fx.at(-1)-s.fx[0]),y=symmetric?view.ymin+t*spanY:s.fy[0]+t*(s.fy.at(-1)-s.fy[0]);text(c,fftNumber(x),X(x),top+h+23,'center');text(c,fftNumber(y),left-12,Y(y)+4,'right');}
+  text(c,'fx [cycles/µm]',left+w/2,top+h+50,'center');c.save();c.translate(left-58,top+h/2);c.rotate(-Math.PI/2);text(c,'fy [cycles/µm]',0,0,'center');c.restore();
+  const barX=804;for(let k=0;k<h;k++){c.fillStyle=`rgb(${color(display.max-(display.max-display.min)*k/h,display.min,display.max,false,colormap)})`;c.fillRect(barX,top+k,16,1);}text(c,unit,barX+8,top-12,'center');for(let k=0;k<=4;k++)text(c,fmt(display.max-(display.max-display.min)*k/4),barX+22,top+k*h/4+4);
+  text(c,`${label} · fx ${fftNumber(view.xmin)} to ${fftNumber(view.xmax)} / fy ${fftNumber(view.ymin)} to ${fftNumber(view.ymax)} cycles/µm`,450,514,'center');
+  text(c,`Δfx ${fftNumber(s.dfX)} / Δfy ${fftNumber(s.dfY)} cycles/µm · Original FFT bins · Equal frequency scale on X/Y`,450,538,'center');
+  text(c,`Color ${fftNumber(display.min)} to ${fftNumber(display.max)} ${unit} · ${display.manual?'manual':'full-spectrum scale'} · Window ${s.window}`,450,560,'center');
+  text(c,wavelengths.length?`Visible rings, outer to inner: ${visibleRings.map(fftNumber).join(', ')||'none'} µm${visibleRings.length<wavelengths.length?' (other rings outside view)':''}`:'Wavelength rings: off',450,582,'center');
+  canvas._fftArea={left,top,w,h,view};const background=document.createElement('canvas');background.width=canvas.width;background.height=canvas.height;background.getContext('2d').drawImage(canvas,0,0);canvas._fftBackground=background;
+}
+export function drawFFTProbe(canvas,sample=null) {
+  const p=canvas._fftArea,background=canvas._fftBackground;if(!p||!background)return;
+  const c=canvas.getContext('2d');c.clearRect(0,0,canvas.width,canvas.height);c.drawImage(background,0,0);
+  if(!sample||sample.fx<p.view.xmin||sample.fx>p.view.xmax||sample.fy<p.view.ymin||sample.fy>p.view.ymax)return;
+  const x=p.left+(sample.fx-p.view.xmin)/(p.view.xmax-p.view.xmin)*p.w,y=p.top+(p.view.ymax-sample.fy)/(p.view.ymax-p.view.ymin)*p.h;
+  c.save();c.beginPath();c.rect(p.left,p.top,p.w,p.h);c.clip();c.strokeStyle='#243346';c.lineWidth=3;c.beginPath();c.arc(x,y,7,0,Math.PI*2);c.stroke();c.strokeStyle='#fff';c.lineWidth=1.4;c.stroke();c.restore();
 }
