@@ -26,8 +26,8 @@ export function displayColors(s,{kind='power',log=true,dc=false,min=null,max=nul
   if(!Number.isFinite(lo)){lo=log?-1:0;hi=log?0:1;}
   if(lo===hi)hi=lo+1;
   const manual=min!==null||max!==null;
-  if(manual){if(!Number.isFinite(min)||!Number.isFinite(max)||min>=max)throw Error('色範囲を指定する場合はminとmaxを両方入力し、min < maxにしてください。');lo=min;hi=max;}
-  return {values,min:lo,max:hi,manual};
+  if(manual){if(min!==null&&!Number.isFinite(min)||max!==null&&!Number.isFinite(max))throw Error('色範囲には数値か空欄のAutoを指定してください。');lo=min??lo;hi=max??hi;if(lo>=hi)throw Error('色範囲は min < max にしてください。空欄は全域の値からAutoで求めます。');}
+  return {values,min:lo,max:hi,manual,minAuto:min===null,maxAuto:max===null};
 }
 export function frequencyInfo(fx,fy) {
   const frequency=Math.hypot(fx,fy),dc=frequency===0;

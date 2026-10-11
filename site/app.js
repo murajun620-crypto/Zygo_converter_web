@@ -1,10 +1,10 @@
 import {hitLine, dragLine, frameQueue} from './interaction.js';
 import {datFiles, installFileDrop} from './upload.js';
-import {installHelp} from './help.js?v=scratches-1';
-import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js';
+import {installHelp} from './help.js?v=auto-color-1';
+import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=auto-color-1';
 import {MAX_PIXELS} from './analysis.js';
 import {extractProfile, bandRMS} from './advanced.js';
-import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,fftMap,drawFFTProbe} from './charts.js';
+import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,fftMap,drawFFTProbe,surfaceColorRange} from './charts.js?v=auto-color-1';
 import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js';
 const $ = id => document.getElementById(id);
 let results = [], failures = [], selected = 0, sources = new Map(), busy = false, exporting = false, worker, pending, nextId = 0, cancelled = false, activeTab = 'surface';
@@ -18,7 +18,11 @@ function getOptions() {
   const wavelength = $('cutoffUnit').value === 'wavelength', low = Number($('cutoffLow').value), high = Number($('cutoffHigh').value);
   return {form: $('form').value, plane: $('form').value === 'plane', filter: $('filter').value, cutoffLow: wavelength ? 1 / low : low, cutoffHigh: wavelength ? 1 / high : high, cutoffInputUnit: $('cutoffUnit').value, rolloff: $('rolloff').value, edge: $('edge').value, researchWindow: $('researchWindow').value, psdInput: $('psdInput').value, mode: $('mode').value, direction: $('direction').value, clip: $('clip').checked, limit, window: $('window').value, missing: $('missing').value};
 }
-function displayLimit() {const n = Number($('displayLimit').value); return Number.isFinite(n) && n > 0 ? Math.min(n, 1e6) : 10;}
+let appliedDisplayLimit=null;
+function displayLimit() {if($('displayLimit').checkValidity())appliedDisplayLimit=$('displayLimit').value===''?null:Number($('displayLimit').value);return appliedDisplayLimit;}
+const autoSurfaceRanges=new WeakMap();
+function surfaceRange(r){const limit=displayLimit();if(limit!==null)return surfaceColorRange([],limit);if(!autoSurfaceRanges.has(r))autoSurfaceRanges.set(r,surfaceColorRange(r.surface));return autoSurfaceRanges.get(r);}
+function paintSurface(r,canvases,lines){const range=surfaceRange(r);heatmap(canvases.surface2d,r.surface,r.cols,r.rows,r.dx,{range,colormap:$('colormap').value,lines});surface3d(canvases.surface3d,r,{azimuth,elevation,range,colormap:$('colormap').value});if(canvases.surface2d===$('surface2d'))$('surfaceColorHint').textContent=`${range.mode==='auto'?'Auto（全域のmin〜max）':'指定範囲'}: ${range.min.toPrecision(5)}〜${range.max.toPrecision(5)} nm · 2D / 3D共通。空欄でAuto。数値入力で±指定値。`;}
 function modeUI() {
   $('filterOptions').hidden = $('filter').value === 'off'; $('cutoffLow').disabled = $('filter').value === 'lowpass'; $('cutoffHigh').disabled = $('filter').value === 'highpass';
   $('psdInputHint').textContent=$('psdInput').value==='processed'?'マップと同じ形状補正・FFTフィルター・クリップを適用します。補正でスペクトルも変わります。':$('psdInput').value==='raw'?'未補正の高さ。FFTフィルター・クリップなし。傾きによる長波長成分を含みます。':'平面補正のみ。FFTフィルター・高さクリップは適用しません。';
@@ -72,8 +76,7 @@ function renderFiles() {
 function paint(r, canvases, row = Math.min(r.rows - 1, Math.floor(r.rows / 2) + 2), profileOverride = null) {
   const current=r.key===active()?.key, draft=current?draftLine(r):{x0:0,y0:row*r.dx,x1:(r.cols-1)*r.dx,y1:row*r.dx,name:'Current',draft:true,color:'#263545'};
   const lines=[...profiles.filter(p=>p.key===r.key&&p.visible),draft];
-  heatmap(canvases.surface2d,r.surface,r.cols,r.rows,r.dx,{limit:displayLimit(),colormap:$('colormap').value,lines});
-  surface3d(canvases.surface3d,r,{azimuth,elevation,limit:displayLimit(),colormap:$('colormap').value});
+  paintSurface(r,canvases,lines);
   const series=profileOverride??(current?profileSeries():[extractProfile(r,draft)]);
   try {seriesChart(canvases.profile,series.map(p=>({x:p.distance,y:p.height,color:p.color,name:p.name,draft:p.draft})),{limits:current?profileAxes():{}});} catch(e){notify(e.message,true);}
   if(r.iw&&r.ih)heatmap(canvases.intensity,r.intensity,r.iw,r.ih,r.dx,{gray:true,unit:'a.u.'});
@@ -119,7 +122,7 @@ async function saveZip(items) {
     const labels = ['2D Surface', '3D Surface', 'Line Profiles', 'Intensity', 'X Slope', 'Y Slope'];
     canvasIds.slice(0, 6).forEach((id, k) => {const x = (k % 2) * 900, y = 60 + Math.floor(k / 2) * 560; c.font = '18px sans-serif'; c.fillText(labels[k], x + 30, y + 18); c.drawImage(canvases[id], x, y + 20, 900, 540);});
     entries.push({name:`${prefix}/profiles.xlsx`,data:profileWorkbook(saved,[r],r.key===active()?.key?profileAxes():{})},{name:`${prefix}/research.xlsx`,data:researchWorkbook(r,bandSummary(r),{wavelength:$('psdAxis').value==='wavelength'})},{name:`${prefix}/2d_psd.csv`,data:spectrumCSV(r,'power')},{name:`${prefix}/2d_amplitude.csv`,data:spectrumCSV(r,'amplitude')});
-    entries.push({name: `${prefix}/allfigs.png`, data: await pngBytes(overview)}, {name: `${prefix}/psd.xlsx`, data: psdWorkbook(r,{wavelength:$('psdAxis').value==='wavelength'})}, {name: `${prefix}/mean_psd.csv`, data: csv(meanRows(r))}, {name: `${prefix}/surface_height_nm.csv`, data: surfaceCSV(r)}, {name: `${prefix}/parameters.json`, data: JSON.stringify({...metadata(r), export_psd_axis:$('psdAxis').value, export_display_limit_nm: displayLimit(), export_profiles:saved.map(p=>({name:p.name,x0:p.x0,y0:p.y0,x1:p.x1,y1:p.y1})),export_colormap:$('colormap').value,export_profile_axes:r.key===active()?.key?profileAxes():{},export_fft_kind:$('fftKind').value,export_fft_log:$('fftLog').checked,export_fft_dc:$('fftDC').checked,export_fft_view:fftExportSettings(r)}, null, 2)});
+    entries.push({name: `${prefix}/allfigs.png`, data: await pngBytes(overview)}, {name: `${prefix}/psd.xlsx`, data: psdWorkbook(r,{wavelength:$('psdAxis').value==='wavelength'})}, {name: `${prefix}/mean_psd.csv`, data: csv(meanRows(r))}, {name: `${prefix}/surface_height_nm.csv`, data: surfaceCSV(r)}, {name: `${prefix}/parameters.json`, data: JSON.stringify({...metadata(r), export_psd_axis:$('psdAxis').value, export_display_limit_nm: displayLimit(),export_surface_color_range:surfaceRange(r), export_profiles:saved.map(p=>({name:p.name,x0:p.x0,y0:p.y0,x1:p.x1,y1:p.y1})),export_colormap:$('colormap').value,export_profile_axes:r.key===active()?.key?profileAxes():{},export_fft_kind:$('fftKind').value,export_fft_log:$('fftLog').checked,export_fft_dc:$('fftDC').checked,export_fft_view:fftExportSettings(r)}, null, 2)});
     await new Promise(resolve => setTimeout(resolve, 0));
   }
   download(items.length === 1 ? `${safeName(items[0].name)}_results.zip` : 'zygo_batch_results.zip', zip(entries), 'application/zip');
@@ -135,9 +138,10 @@ function renderProfileList(){$('profileList').replaceChildren();for(const p of p
 function spectralLabel(r){const c=r.psdConditions;return `${c.input==='plane'?'平面補正のみ':c.input==='raw'?'未補正':`マップ補正後 (${c.form})`} / FFT ${c.filter} / ${c.clip?`±${r.options.limit} nm`:'クリップなし'}`;}
 function fftConfig(r){
   const s=r.research.spectrum,mode=$('fftZoom').value;
+  for(const id of ['fftColorMin','fftColorMax'])if(!$(id).checkValidity())throw Error('色のmin/maxには数値か、空欄のAutoを指定してください。');
   return {view:fftView(s,mode,$('fftRange').value),kind:$('fftKind').value,log:$('fftLog').checked,dc:$('fftDC').checked,min:$('fftColorMin').value===''?null:Number($('fftColorMin').value),max:$('fftColorMax').value===''?null:Number($('fftColorMax').value),wavelengths:$('fftRings').checked?parseWavelengths($('fftWavelengths').value):[],colormap:$('colormap').value};
 }
-function fftExportSettings(r){const q=fftConfig(r),d=displayColors(r.research.spectrum,q);return {frequency_bounds_cycles_per_um:q.view,color_min:d.min,color_max:d.max,color_scale:d.manual?'manual':'full-spectrum',kind:q.kind,log10:q.log,dc_visible:q.dc,wavelength_rings_um:q.wavelengths,frequency_pixel_rendering:'nearest neighbour, original FFT bins',csv_scope:'full spectrum; untransformed',frequency_resolution_cycles_per_um:{x:r.research.spectrum.dfX,y:r.research.spectrum.dfY}};}
+function fftExportSettings(r){const q=fftConfig(r),d=displayColors(r.research.spectrum,q);return {frequency_bounds_cycles_per_um:q.view,color_min:d.min,color_max:d.max,color_scale:d.manual?'manual':'full-spectrum',color_min_auto:d.minAuto,color_max_auto:d.maxAuto,kind:q.kind,log10:q.log,dc_visible:q.dc,wavelength_rings_um:q.wavelengths,frequency_pixel_rendering:'nearest neighbour, original FFT bins',csv_scope:'full spectrum; untransformed',frequency_resolution_cycles_per_um:{x:r.research.spectrum.dfX,y:r.research.spectrum.dfY}};}
 function renderFFT(r,canvas=$('fftPlot'),probe=true){
   const s=r.research.spectrum,q=fftConfig(r),d=displayColors(s,q),unit=q.log?(q.kind==='power'?'log10(nm²·µm²)':'log10(nm)'):(q.kind==='power'?'nm²·µm²':'nm');
   fftMap(canvas,s,d,{view:q.view,wavelengths:q.wavelengths,colormap:q.colormap,unit,label:q.kind==='power'?'2D PSD':'FFT amplitude'});
@@ -148,7 +152,7 @@ function renderFFT(r,canvas=$('fftPlot'),probe=true){
     fftRendered={key:r.key,s,q,d};if(fftSample)fftSample=sampleSpectrum(s,fftSample.fx,fftSample.fy,q.kind);
     if(probe)drawFFTProbe(canvas,fftSample);updateFFTReadout();
     const v=q.view,half=Math.min(v.xmax-v.xmin,v.ymax-v.ymin)/2;
-    $('fftViewNote').textContent=`表示: fx ${v.xmin.toPrecision(4)}〜${v.xmax.toPrecision(4)} / fy ${v.ymin.toPrecision(4)}〜${v.ymax.toPrecision(4)} 1/µm。${v.mode==='full'?'全域。':`軸端付近の波長 ≈ ${(1/half).toPrecision(4)} µm（斜めは異なります）。`} Δfx ${s.dfX.toPrecision(4)} / Δfy ${s.dfY.toPrecision(4)} 1/µm。表示の拡大だけで分解能は増えません。色範囲は${d.manual?'指定値':'全域から算出し、拡大時も共通'}。円は等波長の目安で、フィルターではありません。CSVは全域の元の数値です。`;
+    $('fftViewNote').textContent=`表示: fx ${v.xmin.toPrecision(4)}〜${v.xmax.toPrecision(4)} / fy ${v.ymin.toPrecision(4)}〜${v.ymax.toPrecision(4)} 1/µm。${v.mode==='full'?'全域。':`軸端付近の波長 ≈ ${(1/half).toPrecision(4)} µm（斜めは異なります）。`} Δfx ${s.dfX.toPrecision(4)} / Δfy ${s.dfY.toPrecision(4)} 1/µm。表示の拡大だけで分解能は増えません。色 min ${d.minAuto?'Auto':'指定値'} ${d.min.toPrecision(5)} / max ${d.maxAuto?'Auto':'指定値'} ${d.max.toPrecision(5)} ${unit}。Autoは全域から算出し、拡大時も共通。円は等波長の目安で、フィルターではありません。CSVは全域の元の数値です。`;
   }
 }
 function updateFFTReadout(){
@@ -188,7 +192,10 @@ $('mode').addEventListener('change', () => {$('clip').checked = $('mode').value 
 $('cancel').onclick = () => {cancelled = true; worker?.terminate(); worker = null; pending?.reject(new Error('中止')); pending = null;};
 $('remove').onclick = () => {const r = active(); sources.delete(r.key); profiles=profiles.filter(p=>p.key!==r.key); results.splice(selected, 1); selected = Math.min(selected, Math.max(0, results.length - 1)); renderFiles(); renderActive();};
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => selectTab(b.dataset.tab));
-$('displayLimit').onchange = () => {if (!$('displayLimit').checkValidity()) {notify('表示範囲には正の数値を指定してください。', true); return;} if (active()) renderActive();};
+const surfaceColorFrame=frameQueue(()=>{if(active())try{paintSurface(active(),{surface2d:$('surface2d'),surface3d:$('surface3d')},profileLines());notify('');}catch(e){notify(e.message,true);}});
+$('displayLimit').oninput=()=>{if($('displayLimit').checkValidity())surfaceColorFrame.push(true);};
+$('displayLimit').onchange=()=>{if(!$('displayLimit').checkValidity()){notify('カラーバー範囲には正の数値か、空欄のAutoを指定してください。',true);return;}surfaceColorFrame.push(true);};
+$('surfaceColorAuto').onclick=()=>{$('displayLimit').value='';surfaceColorFrame.push(true);};
 function profileLines(){const r=active();return r?[...profiles.filter(p=>p.key===r.key&&p.visible),draftLine(r)]:[];}
 function paintProfiles(){
   const r=active();if(!r)return;drawProfileLines($('surface2d'),profileLines());configureProfile(r);
@@ -239,14 +246,14 @@ $('surface2d').onpointercancel=e=>endGesture(e,true);
 $('surface2d').onlostpointercapture=e=>{if(gesture)endGesture(e,true);};
 let dragging;
 $('surface3d').onpointerdown = e => {dragging = {x: e.clientX, y: e.clientY}; $('surface3d').setPointerCapture(e.pointerId);};
-$('surface3d').onpointermove = e => {if (!dragging || !active()) return; azimuth += (e.clientX - dragging.x) * 0.008; elevation = Math.max(0.15, Math.min(1.4, elevation + (e.clientY - dragging.y) * 0.008)); dragging = {x: e.clientX, y: e.clientY}; surface3d($('surface3d'), active(), {azimuth, elevation, limit: displayLimit(), colormap: $('colormap').value});};
+$('surface3d').onpointermove = e => {if (!dragging || !active()) return; azimuth += (e.clientX - dragging.x) * 0.008; elevation = Math.max(0.15, Math.min(1.4, elevation + (e.clientY - dragging.y) * 0.008)); dragging = {x: e.clientX, y: e.clientY}; surface3d($('surface3d'), active(), {azimuth, elevation, range: surfaceRange(active()), colormap: $('colormap').value});};
 $('surface3d').onpointerup = $('surface3d').onpointercancel = () => {dragging = null;};
 for (const id of ['allLines', 'psdAxis']) $(id).onchange = () => {if(active()){psdChart($('psdPlot'),[active()],{all:$('allLines').checked,wavelength:$('psdAxis').value==='wavelength'});if(id==='psdAxis'){paintResearch(active(),Object.fromEntries(canvasIds.map(k=>[k,$(k)])));renderComparison();}}};
-document.querySelectorAll('[data-png]').forEach(b => b.onclick = () => saveJob(async () => {if(b.dataset.png==='profile')seriesChart($('profile'),profileSeries().map(p=>({x:p.distance,y:p.height,color:p.color,name:p.name,draft:p.draft})),{limits:profileAxes()});if(b.dataset.png==='fftPlot')renderFFT(active(),$('fftPlot'),false);download(`${safeName(active().name)}_${b.dataset.png}.png`, await pngBytes($(b.dataset.png)), 'image/png');if(b.dataset.png==='fftPlot')drawFFTProbe($('fftPlot'),fftSample);}));
+document.querySelectorAll('[data-png]').forEach(b => b.onclick = () => saveJob(async () => {if(['surface2d','surface3d'].includes(b.dataset.png))surfaceColorFrame.flush();if(b.dataset.png==='profile')seriesChart($('profile'),profileSeries().map(p=>({x:p.distance,y:p.height,color:p.color,name:p.name,draft:p.draft})),{limits:profileAxes()});if(b.dataset.png==='fftPlot')renderFFT(active(),$('fftPlot'),false);download(`${safeName(active().name)}_${b.dataset.png}.png`, await pngBytes($(b.dataset.png)), 'image/png');if(b.dataset.png==='fftPlot')drawFFTProbe($('fftPlot'),fftSample);}));
 $('excel').onclick = () => saveJob(() => download(`${safeName(active().name)}_psd.xlsx`, psdWorkbook(active(),{wavelength:$('psdAxis').value==='wavelength'}), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('meanCSV').onclick = () => saveJob(() => download(`${safeName(active().name)}_mean_psd.csv`, csv(meanRows(active())), 'text/csv;charset=utf-8'));
 $('surfaceCSV').onclick = () => saveJob(() => download(`${safeName(active().name)}_surface.csv`, surfaceCSV(active()), 'text/csv;charset=utf-8'));
-$('parameters').onclick = () => saveJob(() => download(`${safeName(active().name)}_parameters.json`, JSON.stringify({...metadata(active()),export_fft_view:fftExportSettings(active())}, null, 2), 'application/json'));
+$('parameters').onclick = () => saveJob(() => download(`${safeName(active().name)}_parameters.json`, JSON.stringify({...metadata(active()),export_surface_color_range:surfaceRange(active()),export_fft_view:fftExportSettings(active())}, null, 2), 'application/json'));
 $('summary').onclick = () => saveJob(() => download('PSD_summary.xlsx', summaryWorkbook(results, failures, results.map(r=>bandSummary(r))), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('singleZip').onclick = () => saveJob(() => saveZip([active()])); $('downloadAll').onclick = () => saveJob(() => saveZip([...results]));
 $('helpButton').onclick = () => $('help').showModal(); $('closeHelp').onclick = () => $('help').close();
@@ -267,6 +274,8 @@ $('compareExcel').onclick=()=>saveJob(()=>download('PSD_comparison_plot.xlsx',pl
 $('researchExcel').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_research.xlsx`,researchWorkbook(active(),bandSummary(active()),{wavelength:$('psdAxis').value==='wavelength'}),excelType));
 $('fftCSV').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_2d_${$('fftKind').value}.csv`,spectrumCSV(active(),$('fftKind').value), 'text/csv;charset=utf-8'));
 for(const id of ['fftZoom','fftRange','fftRings','fftWavelengths','fftColorMin','fftColorMax'])$(id).onchange=()=>{if(!active())return;try{renderFFT(active());notify('');}catch(e){notify(e.message,true);}};
+const fftColorFrame=frameQueue(()=>{if(active())try{renderFFT(active());notify('');}catch(e){notify(e.message,true);}});
+for(const id of ['fftColorMin','fftColorMax'])$(id).oninput=()=>{if($(id).checkValidity())fftColorFrame.push(true);};
 $('fftApplyView').onclick=()=>{if(!active())return;try{renderFFT(active());notify('');}catch(e){notify(e.message,true);}};
 $('fftResetView').onclick=()=>{$('fftZoom').value='full';$('fftColorMin').value='';$('fftColorMax').value='';if(active())try{renderFFT(active());notify('');}catch(e){notify(e.message,true);}};
 function showFFTProbe(point,pin=false){if(!fftRendered||fftRendered.key!==active()?.key)return;fftSample=sampleSpectrum(fftRendered.s,point.fx,point.fy,fftRendered.q.kind);if(pin)fftPinned=true;drawFFTProbe($('fftPlot'),fftSample);updateFFTReadout();}
