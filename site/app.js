@@ -1,6 +1,6 @@
 import {hitLine, dragLine, frameQueue} from './interaction.js';
 import {datFiles, installFileDrop} from './upload.js';
-import {installHelp} from './help.js?v=histogram-1';
+import {installHelp} from './help.js?v=thin-jet-1';
 import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=auto-color-1';
 import {MAX_PIXELS} from './analysis.js';
 import {extractProfile, bandRMS} from './advanced.js';

@@ -1,4 +1,4 @@
-import {renderExamples} from './help-examples.js?v=histogram-1';
+import {renderExamples} from './help-examples.js?v=thin-jet-1';
 
 export const topics = {
   surface: ['表面マップ・3D形状',
