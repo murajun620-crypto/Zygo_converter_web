@@ -108,3 +108,22 @@ export function bandRMS(psd,minWavelength,maxWavelength) {
   let variance=0,bins=0;for(let i=0;i<psd.frequencies.length;i++){const f=psd.frequencies[i];if(f>=1/maxWavelength&&f<=1/minWavelength&&Number.isFinite(psd.mean[i])){variance+=psd.mean[i]*psd.df;bins++;}}
   return {rms:bins?Math.sqrt(Math.max(0,variance)):NaN,bins};
 }
+
+// Standard one-sided PSD: sum density * df, assigning each positive bin once.
+export function frequencyBands(psd,lowBoundary,highBoundary) {
+  if(!Number.isFinite(lowBoundary)||!Number.isFinite(highBoundary)||!(0<lowBoundary&&lowBoundary<highBoundary))throw new Error('周波数境界は 0 < 低／中 < 中／高で指定してください。');
+  if(!(psd.df>0)||!Number.isFinite(psd.df)||psd.mean.length!==psd.frequencies.length)throw new Error('PSDの周波数間隔または配列が不正です。');
+  const bands=['low','middle','high'].map(key=>({key,integral:0,rms:0,bins:0}));
+  let minFrequency=Infinity,maxFrequency=0;
+  for(let i=0;i<psd.frequencies.length;i++){
+    const f=psd.frequencies[i],density=psd.mean[i];
+    if(!(f>0)||!Number.isFinite(f)||!Number.isFinite(density))continue;
+    if(density<0)throw new Error('PSD密度は0以上である必要があります。');
+    const band=bands[f<lowBoundary?0:f<highBoundary?1:2];
+    band.integral+=density*psd.df;band.bins++;
+    minFrequency=Math.min(minFrequency,f);maxFrequency=Math.max(maxFrequency,f);
+  }
+  for(const band of bands)band.rms=Math.sqrt(band.integral);
+  const totalIntegral=bands.reduce((sum,b)=>sum+b.integral,0);
+  return {lowBoundary,highBoundary,df:psd.df,minFrequency:Number.isFinite(minFrequency)?minFrequency:null,maxFrequency:maxFrequency||null,bands,totalIntegral,totalRMS:Math.sqrt(totalIntegral)};
+}

@@ -1,5 +1,5 @@
 import {computePSD, surfaceStats, prepareSurface, slope} from './analysis.js';
-import {spectrum2D, extractProfile, filterSurface, heightDistribution, bandRMS} from './advanced.js';
+import {spectrum2D, extractProfile, filterSurface, heightDistribution, bandRMS, frequencyBands} from './advanced.js?v=frequency-bands-2';
 
 // Educational surfaces are generated locally and use the same numerical routines as DAT analysis.
 export const COLS = 320, ROWS = 240, DX = 2.5, SCRATCH_DX = 1.25;
@@ -43,12 +43,8 @@ const scratches=Object.fromEntries(scratchIds.map(id=>{
   }),SCRATCH_DX);
   return [id,data];
 }));
-// Share the full measured height range across orientations, rounded outwards in nm.
-export const scratchHeightRange=Object.freeze((()=>{
-  let min=Infinity,max=-Infinity;
-  for(const data of Object.values(scratches))for(const z of data){min=Math.min(min,z);max=Math.max(max,z);}
-  return [Math.floor(min),Math.ceil(max)];
-})());
+// Shared teaching scale; values outside it saturate in color only.
+export const scratchHeightRange=Object.freeze([-15,15]);
 export const cases = {
   flat: ['凹凸のない平坦面', () => 0],
   short: ['20 µm間隔の縦筋', (x) => wave(x,20)],
@@ -100,6 +96,16 @@ for(const topic of ['surface','profile','slope','stats','psd','window','fft','ra
 function element(tag,text,className) {const node=document.createElement(tag);if(text)node.textContent=text;if(className)node.className=className;return node;}
 const fmt = value => Number.isFinite(value)?value.toFixed(2):'—';
 function statsText(data) {const s=surfaceStats(data);return `Sq ${fmt(s.sq)} nm · Sa ${fmt(s.sa)} nm · PV ${fmt(s.pv)} nm`;}
+function frequencyPanel(grid,data,scratch) {
+  const window=scratch?'hann':'boxcar',pair=['x','y'].map(d=>frequencyBands(examplePSD(data,d,window),.02,.1));
+  panel(grid,'低・中・高周波のPSD積分値',`境界 f1=0.02 / f2=0.1 [1/µm]（波長50 / 10 µm）。緑=X、橙=Y。積分はPSD×Δf [nm²]。X: ${pair[0].bands.map(b=>fmt(b.integral)).join(' / ')}、Y: ${pair[1].bands.map(b=>fmt(b.integral)).join(' / ')}（低 / 中 / 高）。${window}窓・各ライン平均除去。`,canvas=>{
+    const c=canvas.getContext('2d'),left=55,top=25,w=355,h=225,max=Math.max(1e-12,...pair.flatMap(p=>p.bands.map(b=>b.integral)))*1.1;
+    c.fillStyle='white';c.fillRect(0,0,440,310);c.font='12px "Segoe UI", sans-serif';
+    for(let k=0;k<=4;k++){const y=top+h-h*k/4;c.strokeStyle='#e2e8ed';c.beginPath();c.moveTo(left,y);c.lineTo(left+w,y);c.stroke();c.fillStyle='#47586a';c.textAlign='right';c.fillText(fmt(max*k/4),left-6,y+4);}
+    for(let k=0;k<3;k++){const center=left+w*(k+.5)/3;pair.forEach((p,d)=>{c.fillStyle=colors[d];const bar=h*p.bands[k].integral/max;c.fillRect(center+(d-.5)*28-12,top+h-bar,24,bar);});c.fillStyle='#47586a';c.textAlign='center';c.fillText(['低（>50 µm）','中（10〜50 µm）','高（≤10 µm）'][k],center,top+h+22);}
+    c.save();c.translate(14,top+h/2);c.rotate(-Math.PI/2);c.fillText('PSD積分値 [nm²]',0,0);c.restore();
+  });
+}
 function panel(grid,title,caption,draw) {
   const figure=element('figure',null,'example-figure'),h=element('h4',title),canvas=element('canvas');
   canvas.width=440;canvas.height=310;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',`${title}。${caption}`);
@@ -205,12 +211,12 @@ export function renderExamples(topic,host) {
       const directional=id!=='scratch-random',py=examplePSD(data,'y','hann');
       const direction={'scratch-vertical':'垂直（90°）','scratch-horizontal':'水平（0°）','scratch-diagonal':'斜め（45°）'}[id];
       text=directional?`${direction}を中心に角度が約±10°ばらつく傷です。傷を横切る方向では高さが大きく変わり、FFTには傷と直交する方向に広がった帯が現れます。傷の間隔は一定ではないため、等間隔の筋のような鋭い周期ピークにはなりません。`:'方向も深さもランダムな傷です。FFTのパワーは多方向に広がりますが、傷の本数が有限で交差・配置にも偏りがあるため、完全な円対称や角度集中度0にはなりません。';
-      note.textContent=`研磨スクラッチを模した合成データ（実測ではありません）。320 × 240点、間隔1.25 µm、Jet表示。${SCRATCH_COUNT}本の細いガウス形の溝。各溝の公称深さ4〜14 nm、半値全幅約2.1〜3.1 µm、長さ110〜200 µm。深さは溝に沿っても±10%変化し、端はなだらか。交差部は溝を足すため個々の深さより深くなります。4例は位置・深さ・幅・長さ・背景を共通にし、方向だけを変更。高さの色範囲は4例の全画素のmin〜maxを1 nm刻みで外側に丸めた共通Auto（${scratchHeightRange[0]}〜${scratchHeightRange[1]} nm）。モデルは研磨過程の再現ではありません。`;
+      note.textContent=`研磨スクラッチを模した合成データ（実測ではありません）。320 × 240点、間隔1.25 µm、Jet表示。${SCRATCH_COUNT}本の細いガウス形の溝。各溝の公称深さ4〜14 nm、半値全幅約2.1〜3.1 µm、長さ110〜200 µm。深さは溝に沿っても±10%変化し、端はなだらか。交差部は溝を足すため個々の深さより深くなります。4例は位置・深さ・幅・長さ・背景を共通にし、方向だけを変更。高さの色範囲は4例で±15 nm共通。範囲外は色だけ飽和し、高さやPSDの計算値は変えません。モデルは研磨過程の再現ではありません。`;
       if(topic==='compare'){
         const ref=exampleSurface('scratch-vertical');text='垂直に偏った傷を基準に、方向の違いを比較します。個々の溝の深さなどは共通でも、交差と測定領域の切り取り方でSq・PVは変わります。同じSqを仮定せず、表示された値とPSDを比較しましょう。';
         surface('① 基準：垂直に偏った傷',ref,statsText(ref),{range:scratchHeightRange});surface('② 選択した傷の面',data,statsText(data),{range:scratchHeightRange});psds('③ X方向のPSDを比較',[psdSeries(examplePSD(ref,'x','hann')),psdSeries(p)],'緑 = 垂直の傷、橙 = 選択例。同じHann窓・測定幅・画素間隔。方向別のPSDなので、X方向だけで等方性を決めません。');
       }else{
-        surface('① スクラッチのある表面',data,`${statsText(data)}。高さは共通Auto ${scratchHeightRange[0]}〜${scratchHeightRange[1]} nm（4例の全点を含む）。${topic==='profile'?'緑 = X、橙 = Y、紫 = 任意線。':''}`,{range:scratchHeightRange,lines:topic==='profile'});
+        surface('① スクラッチのある表面',data,`${statsText(data)}。高さの色範囲は±15 nm共通（色のみ、計算値は変更なし）。${topic==='profile'?'緑 = X、橙 = Y、紫 = 任意線。':''}`,{range:scratchHeightRange,lines:topic==='profile'});
         if(['surface','profile'].includes(topic))profiles('② 3方向の断面を比較',['x','y','arbitrary'].map((d,i)=>({...profile(data,d),color:colors[i]})),'緑 = X ／ 橙 = Y ／ 紫 = 斜め。横軸は実距離。深さや間隔は傷ごとに異なり、切る場所によって見える谷も変わります。');
         if(['fft','psd','xy','radial','stats','window','band','cumulative'].includes(topic)){
           const s=fftPanel(grid,data,id);
@@ -241,6 +247,7 @@ export function renderExamples(topic,host) {
     }
     else if(topic==='band'||topic==='cumulative'){text='長い波長から短い波長へ足すと、含まれる凹凸のRMSが増えます。波長表示では右から左へ読みます。';surface();psds('② どの波長が寄与するか',[psdSeries(p)],`10–30 µm帯：${fmt(bandRMS(p,10,30).rms)} nm ／ 40–100 µm帯：${fmt(bandRMS(p,40,100).rms)} nm。矩形窓。`);panel(grid,'③ 累積RMS（右 → 左）','周波数の刻み幅Δfを掛けて積分。波長の刻み幅は使いません。',c=>curve(c,[cumulative(p)],{xlabel:'空間波長 [µm] · 右から左へ',ylabel:'累積RMS [nm]',xrange:[0,1/p.df]}));}
     else if(topic==='compare'){const a=exampleSurface('short');text='この2面はどちらもSq ≈ 2.12 nmですが、筋の間隔や周期の揃い方が違います。粗さの数値に加えてPSDやマップを見ると、その違いが分かります。';surface('① 試料A：20 µmの筋',a,statsText(a),{limit:7});surface('② 試料B：選択例',data,statsText(data),{limit:7});psds('③ 試料のPSDを比較',[psdSeries(examplePSD(a)),psdSeries(p)],'緑 = A、橙 = B。同じ測定幅・画素間隔・矩形窓で比較。');}
+    if(topic==='band')frequencyPanel(grid,data,scratch);
     takeaway.textContent=text;
     if(!scratch&&['psd','fft','radial','xy','stats','filter','window','clip','band','cumulative','compare'].includes(topic))grid.append(element('p','説明図は、特記した例を除き平均除去＋矩形窓を使用。アプリ初期設定のHann窓ではピークの幅と高さが変わります。対数図の描画下限は最大値の10⁻⁸（計算値は変更しません）。','example-note example-full'));
   }

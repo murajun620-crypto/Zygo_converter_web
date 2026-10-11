@@ -1,11 +1,11 @@
 import {hitLine, dragLine, frameQueue} from './interaction.js';
 import {datFiles, installFileDrop} from './upload.js';
-import {installHelp} from './help.js?v=scratches-60-1';
+import {installHelp} from './help.js?v=frequency-bands-2';
 import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=auto-color-1';
 import {MAX_PIXELS} from './analysis.js';
-import {extractProfile, bandRMS} from './advanced.js';
+import {extractProfile, bandRMS, frequencyBands} from './advanced.js?v=frequency-bands-2';
 import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,fftMap,drawFFTProbe,surfaceColorRange} from './charts.js?v=histogram-1';
-import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js';
+import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js?v=frequency-bands-2';
 const $ = id => document.getElementById(id);
 let results = [], failures = [], selected = 0, sources = new Map(), busy = false, exporting = false, worker, pending, nextId = 0, cancelled = false, activeTab = 'surface';
 let azimuth = -0.7, elevation = 0.65, profiles = [], profileSerial = 0;
@@ -32,10 +32,10 @@ function modeUI() {
 function buttons() {
   $('files').disabled = busy; $('demo').disabled = busy; $('testData').disabled = busy; $('reanalyze').disabled = busy || !results.length; $('downloadAll').disabled = busy || exporting || !results.length;
   for (const id of ['excel', 'meanCSV', 'surfaceCSV', 'parameters', 'singleZip', 'summary', 'remove']) $(id).disabled = busy || exporting;
-  document.querySelectorAll('[data-png], #profileExcel, #psdExcel, #compareExcel, #researchExcel, #fftCSV, #addProfile').forEach(b => b.disabled = busy || exporting || !results.length);
+  document.querySelectorAll('[data-png], #profileExcel, #psdExcel, #compareExcel, #researchExcel, #frequencyApply, #bandExcel, #fftCSV, #addProfile').forEach(b => b.disabled = busy || exporting || !results.length);
 }
 function startWorker() {
-  worker = new Worker(new URL('./worker.js?v=scratches-60-1', import.meta.url), {type: 'module'});
+  worker = new Worker(new URL('./worker.js?v=frequency-bands-2', import.meta.url), {type: 'module'});
   worker.onmessage = ({data}) => {if (pending && pending.id === data.id) {const p = pending; pending = null; data.error ? p.reject(new Error(data.error)) : p.resolve(data.result);}};
   worker.onerror = event => {if (pending) {pending.reject(new Error(event.message || '解析 Worker の起動に失敗しました。')); pending = null;} worker.terminate(); worker = null;};
 }
@@ -122,7 +122,7 @@ async function saveZip(items) {
     const labels = ['2D Surface', '3D Surface', 'Line Profiles', 'Intensity', 'X Slope', 'Y Slope'];
     canvasIds.slice(0, 6).forEach((id, k) => {const x = (k % 2) * 900, y = 60 + Math.floor(k / 2) * 560; c.font = '18px sans-serif'; c.fillText(labels[k], x + 30, y + 18); c.drawImage(canvases[id], x, y + 20, 900, 540);});
     entries.push({name:`${prefix}/profiles.xlsx`,data:profileWorkbook(saved,[r],r.key===active()?.key?profileAxes():{})},{name:`${prefix}/research.xlsx`,data:researchWorkbook(r,bandSummary(r),{wavelength:$('psdAxis').value==='wavelength'})},{name:`${prefix}/2d_psd.csv`,data:spectrumCSV(r,'power')},{name:`${prefix}/2d_amplitude.csv`,data:spectrumCSV(r,'amplitude')});
-    entries.push({name: `${prefix}/allfigs.png`, data: await pngBytes(overview)}, {name: `${prefix}/psd.xlsx`, data: psdWorkbook(r,{wavelength:$('psdAxis').value==='wavelength'})}, {name: `${prefix}/mean_psd.csv`, data: csv(meanRows(r))}, {name: `${prefix}/surface_height_nm.csv`, data: surfaceCSV(r)}, {name: `${prefix}/parameters.json`, data: JSON.stringify({...metadata(r), export_psd_axis:$('psdAxis').value, export_display_limit_nm: displayLimit(),export_surface_color_range:surfaceRange(r), export_profiles:saved.map(p=>({name:p.name,x0:p.x0,y0:p.y0,x1:p.x1,y1:p.y1})),export_colormap:$('colormap').value,export_profile_axes:r.key===active()?.key?profileAxes():{},export_fft_kind:$('fftKind').value,export_fft_log:$('fftLog').checked,export_fft_dc:$('fftDC').checked,export_fft_view:fftExportSettings(r)}, null, 2)});
+    entries.push({name: `${prefix}/allfigs.png`, data: await pngBytes(overview)}, {name: `${prefix}/psd.xlsx`, data: psdWorkbook(r,{wavelength:$('psdAxis').value==='wavelength'})}, {name: `${prefix}/mean_psd.csv`, data: csv(meanRows(r))}, {name: `${prefix}/surface_height_nm.csv`, data: surfaceCSV(r)}, {name: `${prefix}/parameters.json`, data: JSON.stringify({...metadata(r), frequency_bands:frequencySummary(r), export_psd_axis:$('psdAxis').value, export_display_limit_nm: displayLimit(),export_surface_color_range:surfaceRange(r), export_profiles:saved.map(p=>({name:p.name,x0:p.x0,y0:p.y0,x1:p.x1,y1:p.y1})),export_colormap:$('colormap').value,export_profile_axes:r.key===active()?.key?profileAxes():{},export_fft_kind:$('fftKind').value,export_fft_log:$('fftLog').checked,export_fft_dc:$('fftDC').checked,export_fft_view:fftExportSettings(r)}, null, 2)});
     await new Promise(resolve => setTimeout(resolve, 0));
   }
   download(items.length === 1 ? `${safeName(items[0].name)}_results.zip` : 'zygo_batch_results.zip', zip(entries), 'application/zip');
@@ -168,9 +168,23 @@ function paintResearch(r,canvases){
   const cumulative=p=>{let v=0;return Float64Array.from(p.mean,q=>{v+=Number.isFinite(q)?q*p.df:0;return Math.sqrt(v);});};
   seriesChart(canvases.cumulativePlot,[{x:axis(a.x.frequencies),y:cumulative(a.x)},{x:axis(a.y.frequencies),y:cumulative(a.y)}],{xlabel,ylabel:'Cumulative RMS [nm]'});histogramChart(canvases.histogramPlot,a.distribution);
 }
-function bandSummary(r){const min=Number($('bandMin').value),max=Number($('bandMax').value);return {minWavelength:min,maxWavelength:max,x:bandRMS(r.research.x,min,max),y:bandRMS(r.research.y,min,max)};}
+function frequencySummary(r){const low=Number($('frequencyLow').value),high=Number($('frequencyHigh').value);return {x:frequencyBands(r.research.x,low,high),y:frequencyBands(r.research.y,low,high)};}
+function bandSummary(r){const min=Number($('bandMin').value),max=Number($('bandMax').value);return {minWavelength:min,maxWavelength:max,x:bandRMS(r.research.x,min,max),y:bandRMS(r.research.y,min,max),frequency:frequencySummary(r)};}
+function renderFrequencyBands(r){
+  const table=$('frequencyTable'),number=v=>Number.isFinite(v)?v.toPrecision(6):'—';table.replaceChildren();
+  try{
+    const b=frequencySummary(r),lo=b.x.lowBoundary,hi=b.x.highBoundary;
+    $('frequencyDetails').textContent=`低: 0 < f < ${lo} / 中: ${lo} ≤ f < ${hi} / 高: f ≥ ${hi} [1/µm]。境界の波長 ${1/lo} / ${1/hi} µm。各方向の測定PSDビン内のみ。X: ${number(b.x.minFrequency)}〜${number(b.x.maxFrequency)} / Y: ${number(b.y.minFrequency)}〜${number(b.y.maxFrequency)} [1/µm]。窓: ${r.research.window}。入力: ${spectralLabel(r)}。`;
+    const names=['低周波','中周波','高周波','合計'];
+    for(let i=0;i<4;i++){
+      const pair=['x','y'].map(d=>i<3?b[d].bands[i]:{integral:b[d].totalIntegral,rms:b[d].totalRMS,bins:b[d].bands.reduce((n,v)=>n+v.bins,0)}),tr=document.createElement('tr');
+      for(const value of [names[i],...pair.flatMap(v=>[number(v.integral),number(v.rms),v.bins])]){const td=document.createElement('td');td.textContent=value;tr.append(td);}table.append(tr);
+    }
+  }catch(e){$('frequencyDetails').textContent=e.message;}
+}
+
 const metric=n=>Number.isFinite(n)?n.toFixed(3):'—';
-function renderResearchDetails(r){const a=r.research,s=a.spectrum;try{const b=bandSummary(r);$('bandDetails').textContent=`波長 ${b.minWavelength}〜${b.maxWavelength} µm\nX: ${metric(b.x.rms)} nm (${b.x.bins} bins) / Y: ${metric(b.y.rms)} nm (${b.y.bins} bins)\n離散PSDビンを積分。窓: ${a.window}。範囲外の波長は寄与しません。`;}catch(e){$('bandDetails').textContent=e.message;}$('heightDetails').textContent=`Ssk: ${metric(a.distribution.ssk)} / Sku: ${metric(a.distribution.sku)} · クリップ前。極端な点の影響を含みます。`;$('fftDetails').textContent=`入力: ${spectralLabel(r)}\n最大ピークの波長: ${metric(s.peakWavelength)} µm\n周波数ベクトル角: ${metric(s.wavevectorAngle)}° / 筋に相当する向き: ${metric((s.wavevectorAngle+90)%180)}°\n角度集中度: ${metric(s.anisotropy)}（0〜1） / 主軸: ${metric(s.principalAngle)}°\nΔfx ${s.dfX.toPrecision(3)} / Δfy ${s.dfY.toPrecision(3)} 1/µm · ${s.window}窓\n${s.missing?'欠損マスクによるスペクトルの歪みを含みます。':'欠損なし。'}${s.windowFallback?' Hannの窓エネルギーが0のため、2D FFTのみ矩形窓へ切り替えました。':''} 平面除去・窓でピークの高さは変わります。`;}
+function renderResearchDetails(r){renderFrequencyBands(r);const a=r.research,s=a.spectrum;try{const b=bandSummary(r);$('bandDetails').textContent=`波長 ${b.minWavelength}〜${b.maxWavelength} µm\nX: ${metric(b.x.rms)} nm (${b.x.bins} bins) / Y: ${metric(b.y.rms)} nm (${b.y.bins} bins)\n離散PSDビンを積分。窓: ${a.window}。範囲外の波長は寄与しません。`;}catch(e){$('bandDetails').textContent=e.message;}$('heightDetails').textContent=`Ssk: ${metric(a.distribution.ssk)} / Sku: ${metric(a.distribution.sku)} · クリップ前。極端な点の影響を含みます。`;$('fftDetails').textContent=`入力: ${spectralLabel(r)}\n最大ピークの波長: ${metric(s.peakWavelength)} µm\n周波数ベクトル角: ${metric(s.wavevectorAngle)}° / 筋に相当する向き: ${metric((s.wavevectorAngle+90)%180)}°\n角度集中度: ${metric(s.anisotropy)}（0〜1） / 主軸: ${metric(s.principalAngle)}°\nΔfx ${s.dfX.toPrecision(3)} / Δfy ${s.dfY.toPrecision(3)} 1/µm · ${s.window}窓\n${s.missing?'欠損マスクによるスペクトルの歪みを含みます。':'欠損なし。'}${s.windowFallback?' Hannの窓エネルギーが0のため、2D FFTのみ矩形窓へ切り替えました。':''} 平面除去・窓でピークの高さは変わります。`;}
 
 function receiveFiles(files){
   if(busy){notify('現在の処理が完了してから追加してください。');return;}
@@ -253,7 +267,7 @@ document.querySelectorAll('[data-png]').forEach(b => b.onclick = () => saveJob(a
 $('excel').onclick = () => saveJob(() => download(`${safeName(active().name)}_psd.xlsx`, psdWorkbook(active(),{wavelength:$('psdAxis').value==='wavelength'}), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('meanCSV').onclick = () => saveJob(() => download(`${safeName(active().name)}_mean_psd.csv`, csv(meanRows(active())), 'text/csv;charset=utf-8'));
 $('surfaceCSV').onclick = () => saveJob(() => download(`${safeName(active().name)}_surface.csv`, surfaceCSV(active()), 'text/csv;charset=utf-8'));
-$('parameters').onclick = () => saveJob(() => download(`${safeName(active().name)}_parameters.json`, JSON.stringify({...metadata(active()),export_surface_color_range:surfaceRange(active()),export_fft_view:fftExportSettings(active())}, null, 2), 'application/json'));
+$('parameters').onclick = () => saveJob(() => download(`${safeName(active().name)}_parameters.json`, JSON.stringify({...metadata(active()),frequency_bands:frequencySummary(active()),export_surface_color_range:surfaceRange(active()),export_fft_view:fftExportSettings(active())}, null, 2), 'application/json'));
 $('summary').onclick = () => saveJob(() => download('PSD_summary.xlsx', summaryWorkbook(results, failures, results.map(r=>bandSummary(r))), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('singleZip').onclick = () => saveJob(() => saveZip([active()])); $('downloadAll').onclick = () => saveJob(() => saveZip([...results]));
 $('helpButton').onclick = () => $('help').showModal(); $('closeHelp').onclick = () => $('help').close();
@@ -264,7 +278,8 @@ for(const k of ['profileXmin','profileXmax','profileYmin','profileYmax'])$(k).on
 $('resetProfileAxes').onclick=()=>{for(const k of ['profileXmin','profileXmax','profileYmin','profileYmax'])$(k).value='';renderActive();};
 $('addProfile').onclick=()=>{try{if(profiles.length>=31)throw new Error('比較する断面は現在の断面を含め32本までです。');const p=draftLine();extractProfile(active(),p);profiles.push({...p,id:++profileSerial,name:$('profileName').value.trim()||`断面 ${profileSerial}`,color:palette[(profileSerial-1)%palette.length],draft:false,visible:true});$('profileName').value='';renderActive();}catch(e){notify(e.message,true);}};
 for(const k of ['colormap','fftKind','fftLog','fftDC'])$(k).onchange=()=>{if(k==='fftKind'||k==='fftLog'){$('fftColorMin').value='';$('fftColorMax').value='';}if(active())renderActive();};
-for(const k of ['bandMin','bandMax'])$(k).onchange=()=>{if(active()){renderResearchDetails(active());renderComparison();}};
+for(const k of ['bandMin','bandMax','frequencyLow','frequencyHigh'])$(k).onchange=()=>{if(active()){renderResearchDetails(active());renderComparison();}};
+$('frequencyApply').onclick=()=>{if(active()){renderResearchDetails(active());renderComparison();}};
 $('researchWindow').onchange=()=>notify('特徴解析の窓を変更しました。「設定を適用して再解析」で反映してください。');
 $('cutoffUnit').onchange=()=>{for(const k of ['cutoffLow','cutoffHigh']){const n=Number($(k).value);if(n>0)$(k).value=1/n;}};
 const excelType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -272,6 +287,7 @@ $('profileExcel').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_p
 $('psdExcel').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_psd_plot.xlsx`,psdWorkbook(active(),{wavelength:$('psdAxis').value==='wavelength'}),excelType));
 $('compareExcel').onclick=()=>saveJob(()=>download('PSD_comparison_plot.xlsx',plotPSDWorkbook(results,$('psdAxis').value==='wavelength'),excelType));
 $('researchExcel').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_research.xlsx`,researchWorkbook(active(),bandSummary(active()),{wavelength:$('psdAxis').value==='wavelength'}),excelType));
+$('bandExcel').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_frequency_bands.xlsx`,researchWorkbook(active(),{frequency:frequencySummary(active())},{wavelength:$('psdAxis').value==='wavelength'}),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('fftCSV').onclick=()=>saveJob(()=>download(`${safeName(active().name)}_2d_${$('fftKind').value}.csv`,spectrumCSV(active(),$('fftKind').value), 'text/csv;charset=utf-8'));
 for(const id of ['fftZoom','fftRange','fftRings','fftWavelengths','fftColorMin','fftColorMax'])$(id).onchange=()=>{if(!active())return;try{renderFFT(active());notify('');}catch(e){notify(e.message,true);}};
 const fftColorFrame=frameQueue(()=>{if(active())try{renderFFT(active());notify('');}catch(e){notify(e.message,true);}});
