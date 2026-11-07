@@ -4,6 +4,19 @@ export function rectangleFromPoints(start,end,width,height) {
   const a={x:clamp(start.x,0,width),y:clamp(start.y,0,height)},b={x:clamp(end.x,0,width),y:clamp(end.y,0,height)};
   return {x0:Math.min(a.x,b.x),x1:Math.max(a.x,b.x),y0:Math.min(a.y,b.y),y1:Math.max(a.y,b.y)};
 }
+export function surfacePoint(result,x,y) {
+  const {cols,rows,dx,surface}=result;
+  if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>(cols-1)*dx||y>(rows-1)*dx)throw Error('計測点はマップ内で指定してください。');
+  const column=Math.round(x/dx),row=Math.round(y/dx);
+  return {column,row,x:column*dx,y:row*dx,z:surface[row*cols+column]};
+}
+export function surfaceMeasurement(a,b){return {dx:b.x-a.x,dy:b.y-a.y,distance:Math.hypot(b.x-a.x,b.y-a.y),heightDifference:Number.isFinite(a.z)&&Number.isFinite(b.z)?b.z-a.z:NaN};}
+export function profilePoint(profile,distance){
+  if(!Number.isFinite(distance)||!profile.distance.length||distance<profile.distance[0]||distance>profile.distance.at(-1))throw Error('計測位置は選択した断面の距離範囲内にしてください。');
+  let lo=0,hi=profile.distance.length-1;while(lo<hi){const mid=Math.floor((lo+hi)/2);if(profile.distance[mid]<distance)lo=mid+1;else hi=mid;}
+  const i=lo>0&&Math.abs(profile.distance[lo-1]-distance)<Math.abs(profile.distance[lo]-distance)?lo-1:lo;
+  return {index:i,distance:profile.distance[i],height:profile.height[i]};
+}
 export function lineDirection(p) {
   return Math.abs(p.y1-p.y0)<1e-8 ? 'x' : Math.abs(p.x1-p.x0)<1e-8 ? 'y' : 'arbitrary';
 }

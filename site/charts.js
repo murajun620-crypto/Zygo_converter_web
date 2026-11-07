@@ -10,17 +10,30 @@ function text(c, label, x, y, align = 'left', color = ink) {c.fillStyle = color;
 function line(c, x1, y1, x2, y2, color = grid) {c.strokeStyle = color; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();}
 const fmt = n => Math.abs(n) >= 1e4 || (Math.abs(n) < 0.01 && n !== 0) ? n.toExponential(1) : Number(n.toFixed(2)).toString();
 const maps = {viridis:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],cividis:[[0,32,77],[65,78,108],[125,124,120],[188,173,108],[255,233,69]],turbo:[[48,18,59],[50,110,220],[24,220,165],[164,252,60],[249,155,30],[180,4,38]],coolwarm:[[59,76,192],[141,176,254],[221,221,221],[244,154,123],[180,4,38]]};
-function color(z, lo, hi, gray = false, map = 'jet') {
-  if (!Number.isFinite(z)) return [237, 241, 244];
-  const t = Math.max(0, Math.min(1, (z - lo) / (hi - lo || 1)));
-  if (gray || map === 'gray') return Array(3).fill(Math.round(255 * t));
-  if (maps[map]) {const stops=maps[map],a=t*(stops.length-1),i=Math.min(stops.length-2,Math.floor(a)),u=a-i;return stops[i].map((v,k)=>Math.round(v*(1-u)+stops[i+1][k]*u));}
-  // Jet-compatible range for visual comparison with the Python figures.
-  const channel = k => Math.round(255 * Math.max(0, Math.min(1, 1.5 - Math.abs(4 * t - k))));
-  return [channel(3), channel(2), channel(1)];
+// Spectrum colour stops from the user-provided vector colourbar only; no surface data.
+export const SPECTRUM_STOPS=Object.freeze([[0.0,[0.0,7.999987,230.99991]],[0.00229095,[0.0,7.999987,230.99991]],[0.0652921,[0.0,43.999995,211.000005]],[0.119129,[0.0,82.99995,172.999905]],[0.183276,[0.0,126.999945,128.000055]],[0.233677,[0.0,163.999935,91.000065]],[0.304696,[0.0,214.00008,40.99992]],[0.369989,[17.999991,255.0,0.0]],[0.430699,[130.999875,255.0,0.0]],[0.4937,[246.00003,255.0,0.0]],[0.575029,[255.0,188.99988,0.0]],[0.646048,[255.0,135.00006,0.0]],[0.717068,[255.0,75.999945,0.0]],[0.774341,[255.0,31.000095,0.0]],[0.841924,[255.0,35.000025,35.000025]],[0.899198,[255.0,96.99996,96.99996]],[0.954181,[255.0,100.99989,100.99989]],[1.0,[255.0,100.99989,100.99989]]].map(([t,rgb])=>Object.freeze([t,Object.freeze(rgb)])));
+export function paletteRGB(t,map='metropro-spectrum') {
+  t=Math.max(0,Math.min(1,t));
+  if(map==='metropro-spectrum'){
+    let i=1;while(i<SPECTRUM_STOPS.length-1&&t>SPECTRUM_STOPS[i][0])i++;
+    const [a,ca]=SPECTRUM_STOPS[i-1],[b,cb]=SPECTRUM_STOPS[i],u=b===a?0:(t-a)/(b-a);
+    return ca.map((v,k)=>Math.round(v+(cb[k]-v)*u));
+  }
+  if(map==='gray')return Array(3).fill(Math.round(255*t));
+  if(maps[map]){const stops=maps[map],a=t*(stops.length-1),i=Math.min(stops.length-2,Math.floor(a)),u=a-i;return stops[i].map((v,k)=>Math.round(v*(1-u)+stops[i+1][k]*u));}
+  const channel=k=>Math.round(255*Math.max(0,Math.min(1,1.5-Math.abs(4*t-k))));return [channel(3),channel(2),channel(1)];
+}
+function color(z,lo,hi,gray=false,map='metropro-spectrum') {
+  if(!Number.isFinite(z))return [237,241,244];
+  return paletteRGB((z-lo)/(hi-lo||1),gray?'gray':map);
 }
 function bounds(values) {let lo = Infinity, hi = -Infinity; for (const v of values) if (Number.isFinite(v)) {lo = Math.min(lo, v); hi = Math.max(hi, v);} return Number.isFinite(lo) ? [lo, hi === lo ? lo + 1 : hi] : [0, 1];}
 export function surfaceColorRange(values,limit=null) {
+  if(limit&&typeof limit==='object'){
+    const auto=surfaceColorRange(values),min=limit.min??auto.min,max=limit.max??auto.max;
+    if(!Number.isFinite(min)||!Number.isFinite(max)||!Number.isFinite(max-min)||min>=max)throw Error('カラーバーは有限な数値で min < max にしてください。');
+    return {min,max,mode:limit.min==null&&limit.max==null?'auto':'manual',limit:null,minMode:limit.min==null?'auto':'manual',maxMode:limit.max==null?'auto':'manual'};
+  }
   if(limit!==null&&limit!==undefined){if(!Number.isFinite(limit)||limit<=0||limit>1e6)throw Error('カラーバー範囲は正の数値（1,000,000 nm以下）か、空欄のAutoにしてください。');return {min:-limit,max:limit,mode:'manual',limit};}
   let min=Infinity,max=-Infinity;for(const v of values)if(Number.isFinite(v)){min=Math.min(min,v);max=Math.max(max,v);}
   if(!Number.isFinite(min)){min=-1;max=1;}
@@ -28,7 +41,7 @@ export function surfaceColorRange(values,limit=null) {
   return {min,max,mode:'auto',limit:null};
 }
 
-export function heatmap(canvas, values, cols, rows, dx, {limit, range=null, gray = false, unit = 'nm', profile = null, axes = true, colormap = 'jet', lines = [], frequencies = null} = {}) {
+export function heatmap(canvas, values, cols, rows, dx, {limit, range=null, gray = false, unit = 'nm', profile = null, axes = true, colormap = 'metropro-spectrum', lines = [], frequencies = null,cacheOverlay=false} = {}) {
   const c = setup(canvas), [lo, hi] = range?[range.min,range.max]:limit ? [-limit, limit] : bounds(values);
   const off = document.createElement('canvas'); off.width = cols; off.height = rows;
   const cc = off.getContext('2d'), pixels = cc.createImageData(cols, rows);
@@ -47,10 +60,10 @@ export function heatmap(canvas, values, cols, rows, dx, {limit, range=null, gray
   if(range)text(c,`Color: ${range.mode==='auto'?'Auto':'Manual'} · ${fmt(lo)} to ${fmt(hi)} ${unit}`,450,520,'center');
   if (profile !== null) {const yy = top + (1 - profile / (rows - 1)) * h; c.setLineDash([7, 5]); line(c, left, yy, left + w, yy, '#ffffff'); c.setLineDash([]); line(c, left, yy + 2, left + w, yy + 2, '#263545');}
   canvas._plotArea = {left, top, w, h, cols, rows, dx};
-  if(lines.length){const background=document.createElement('canvas');background.width=canvas.width;background.height=canvas.height;background.getContext('2d').drawImage(canvas,0,0);canvas._surfaceBackground=background;drawProfileLines(canvas,lines);}
+  if(lines.length||cacheOverlay){const background=document.createElement('canvas');background.width=canvas.width;background.height=canvas.height;background.getContext('2d').drawImage(canvas,0,0);canvas._surfaceBackground=background;drawProfileLines(canvas,lines);}
 }
 
-export function surface3d(canvas, result, {azimuth = -0.7, elevation = 0.65, limit = null, range=null, colormap = 'jet'} = {}) {
+export function surface3d(canvas, result, {azimuth = -0.7, elevation = 0.65, limit = null, range=null, colormap = 'metropro-spectrum'} = {}) {
   const c = setup(canvas), {surface: z, cols, rows, dx} = result;
   const resolved=range??surfaceColorRange(z,limit),lo=resolved.min,hi=resolved.max,center=(lo+hi)/2,half=(hi-lo)/2;
   const maxSpan = Math.max(cols - 1, rows - 1) * dx;
@@ -106,6 +119,7 @@ export function slopeMap(canvas, result, direction) {
 }
 
 export function seriesChart(canvas, series, {xlabel='Distance along line [µm]',ylabel='Height [nm]',log=false,limits={}}={}) {
+  canvas._seriesArea=null;
   const named=series.filter(s=>s.name), xs=series.flatMap(s=>Array.from(s.x).filter(v=>Number.isFinite(v)&&(!log||v>0))),ys=series.flatMap(s=>Array.from(s.y).filter(v=>Number.isFinite(v)&&(!log||v>0)));
   if(!xs.length||!ys.length){text(setup(canvas),'No finite data in the selected spectrum / profile.',180,250);return;}
   let [xmin,xmax]=bounds(xs),[ymin,ymax]=bounds(ys);if(log){xmin=Math.log10(xmin);xmax=Math.log10(xmax);ymin=Math.log10(ymin);ymax=Math.log10(ymax);}else{const pad=(ymax-ymin)*0.08;ymin-=pad;ymax+=pad;}
@@ -115,6 +129,16 @@ export function seriesChart(canvas, series, {xlabel='Distance along line [µm]',
   const c=setup(canvas,900,540+(named.length?Math.ceil(named.length/3)*22:0));
   const f=frame(c,{xmin,xmax,ymin,ymax,xlabel,ylabel,log});series.forEach((s,i)=>curve(c,s.x,s.y,f,s.color??palette[i%palette.length],2,log));
   named.forEach((s,i)=>{const x=65+(i%3)*280,y=537+Math.floor(i/3)*22;c.setLineDash([]);line(c,x,y-4,x+25,y-4,s.color??palette[i%palette.length]);c.setLineDash([]);text(c,s.name.length>32?s.name.slice(0,30)+'…':s.name,x+34,y);});
+  canvas._seriesArea={left:92,top:35,w:740,h:408,xmin,xmax,ymin,ymax,log};
+}
+export function drawMeasurement(canvas,points,{profile=false,caption=''}={}) {
+  const c=canvas.getContext('2d'),a=profile?canvas._seriesArea:canvas._plotArea;if(!a||!points.length)return;
+  const X=x=>profile?a.left+(x-a.xmin)/(a.xmax-a.xmin)*a.w:a.left+x/((a.cols-1)*a.dx)*a.w;
+  const Y=y=>profile?a.top+(a.ymax-y)/(a.ymax-a.ymin)*a.h:a.top+(1-y/((a.rows-1)*a.dx))*a.h;
+  c.save();c.beginPath();c.rect(a.left,a.top,a.w,a.h);c.clip();c.strokeStyle='#d01858';c.fillStyle='#d01858';c.lineWidth=2;
+  const coords=points.map(p=>({x:profile?p.distance:p.x,y:profile?p.height:p.y}));
+  if(coords.length===2&&coords.every(p=>Number.isFinite(p.y))){c.beginPath();c.moveTo(X(coords[0].x),Y(coords[0].y));c.lineTo(X(coords[1].x),Y(coords[1].y));c.stroke();}
+  coords.forEach((p,i)=>{if(!Number.isFinite(p.y)){if(profile){line(c,X(p.x),a.top,X(p.x),a.top+a.h,'#d01858');text(c,`${i?'B':'A'} (missing)`,X(p.x)+5,a.top+15,'left','#d01858');}return;}const x=X(p.x),y=Y(p.y);c.beginPath();c.arc(x,y,5,0,2*Math.PI);c.fill();c.strokeStyle='white';c.stroke();text(c,i?'B':'A',x+8,y-8,'left','#d01858');c.strokeStyle='#d01858';});c.restore();if(caption)text(c,caption,450,19,'center','#b61650');
 }
 export function histogramChart(canvas,distribution) {
   const c=setup(canvas),step=distribution.centers.length>1?distribution.centers[1]-distribution.centers[0]:1,xmin=distribution.centers[0]-step/2,xmax=distribution.centers.at(-1)+step/2,ymax=Math.max(...distribution.counts)*1.1||1,f=frame(c,{xmin,xmax,ymin:0,ymax,xlabel:'Height before clipping [nm]',ylabel:'Pixel count'});

@@ -1,3 +1,4 @@
+import {paletteRGB} from './charts.js?v=metrology-ui-2';
 import {computePSD, surfaceStats, prepareSurface, slope} from './analysis.js';
 import {spectrum2D, extractProfile, filterSurface, heightDistribution, bandRMS, frequencyBands} from './advanced.js?v=frequency-bands-2';
 
@@ -111,10 +112,7 @@ function panel(grid,title,caption,draw) {
   canvas.width=440;canvas.height=310;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',`${title}。${caption}`);
   figure.append(h,canvas,element('figcaption',caption));grid.append(figure);draw(canvas);
 }
-function palette(t) {
-  t=Math.max(0,Math.min(1,t));const channel=k=>Math.round(255*Math.max(0,Math.min(1,1.5-Math.abs(4*t-k))));
-  return [channel(3),channel(2),channel(1)];
-}
+function palette(t){return paletteRGB(t,'metropro-spectrum');}
 function map(canvas,data,{limit=null,range=null,lines=false,frequency=false,label='高さ [nm]'}={}) {
   const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,440,310);
   const {cols,rows,dx,spanX,spanY}=exampleGeometry(data),left=54,w=252,h=frequency?252:w*spanY/spanX,top=16+(252-h)/2,bar=324;
@@ -199,10 +197,10 @@ export function renderExamples(topic,host) {
   const ids=groups[topic];if(!ids)throw new Error(`Missing example group: ${topic}`);
   const section=element('section',null,'help-examples'),label=element('label','解析する表面の例'),select=element('select');select.setAttribute('aria-label','説明用の表面例');
   for(const id of ids){const option=element('option',cases[id][0]);option.value=id;select.append(option);}label.append(select);
-  const note=element('p','説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Jet表示。図の数値はアプリと同じ解析処理で計算します。','example-note'),takeaway=element('p',null,'example-takeaway'),grid=element('div',null,'example-grid');
+  const note=element('p','説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Spectrum表示。図の数値はアプリと同じ解析処理で計算します。','example-note'),takeaway=element('p',null,'example-takeaway'),grid=element('div',null,'example-grid');
   section.append(label,note,takeaway,grid);host.append(section);
   function draw(){const id=select.value,data=exampleSurface(id),scratch=scratchIds.includes(id),p=examplePSD(data,'x',scratch?'hann':'boxcar');grid.replaceChildren();
-    if(!scratch)note.textContent='説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Jet表示。図の数値はアプリと同じ解析処理で計算します。';
+    if(!scratch)note.textContent='説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Spectrum表示。図の数値はアプリと同じ解析処理で計算します。';
     const surface=(title='① 表面マップ',d=data,caption=statsText(d),opts={})=>panel(grid,title,caption,c=>map(c,d,opts));
     const profiles=(title,datasets,caption)=>panel(grid,title,caption,c=>curve(c,datasets));
     const psds=(title,sets,caption)=>psdPanel(grid,title,sets,caption);
@@ -211,7 +209,7 @@ export function renderExamples(topic,host) {
       const directional=id!=='scratch-random',py=examplePSD(data,'y','hann');
       const direction={'scratch-vertical':'垂直（90°）','scratch-horizontal':'水平（0°）','scratch-diagonal':'斜め（45°）'}[id];
       text=directional?`${direction}を中心に角度が約±10°ばらつく傷です。傷を横切る方向では高さが大きく変わり、FFTには傷と直交する方向に広がった帯が現れます。傷の間隔は一定ではないため、等間隔の筋のような鋭い周期ピークにはなりません。`:'方向も深さもランダムな傷です。FFTのパワーは多方向に広がりますが、傷の本数が有限で交差・配置にも偏りがあるため、完全な円対称や角度集中度0にはなりません。';
-      note.textContent=`研磨スクラッチを模した合成データ（実測ではありません）。320 × 240点、間隔1.25 µm、Jet表示。${SCRATCH_COUNT}本の細いガウス形の溝。各溝の公称深さ4〜14 nm、半値全幅約2.1〜3.1 µm、長さ110〜200 µm。深さは溝に沿っても±10%変化し、端はなだらか。交差部は溝を足すため個々の深さより深くなります。4例は位置・深さ・幅・長さ・背景を共通にし、方向だけを変更。高さの色範囲は4例で±15 nm共通。範囲外は色だけ飽和し、高さやPSDの計算値は変えません。モデルは研磨過程の再現ではありません。`;
+      note.textContent=`研磨スクラッチを模した合成データ（実測ではありません）。320 × 240点、間隔1.25 µm、Spectrum表示。${SCRATCH_COUNT}本の細いガウス形の溝。各溝の公称深さ4〜14 nm、半値全幅約2.1〜3.1 µm、長さ110〜200 µm。深さは溝に沿っても±10%変化し、端はなだらか。交差部は溝を足すため個々の深さより深くなります。4例は位置・深さ・幅・長さ・背景を共通にし、方向だけを変更。高さの色範囲は4例で±15 nm共通。範囲外は色だけ飽和し、高さやPSDの計算値は変えません。モデルは研磨過程の再現ではありません。`;
       if(topic==='compare'){
         const ref=exampleSurface('scratch-vertical');text='垂直に偏った傷を基準に、方向の違いを比較します。個々の溝の深さなどは共通でも、交差と測定領域の切り取り方でSq・PVは変わります。同じSqを仮定せず、表示された値とPSDを比較しましょう。';
         surface('① 基準：垂直に偏った傷',ref,statsText(ref),{range:scratchHeightRange});surface('② 選択した傷の面',data,statsText(data),{range:scratchHeightRange});psds('③ X方向のPSDを比較',[psdSeries(examplePSD(ref,'x','hann')),psdSeries(p)],'緑 = 垂直の傷、橙 = 選択例。同じHann窓・測定幅・画素間隔。方向別のPSDなので、X方向だけで等方性を決めません。');
@@ -230,7 +228,7 @@ export function renderExamples(topic,host) {
       }
       grid.append(element('p','スクラッチ例のPSD・2D FFTは平均除去＋Hann窓（窓比較の矩形例を除く）。2D FFTの色範囲は4例で共通、DCは非表示。対数描画の下限より小さい値は色だけを下限に揃え、計算値は変更しません。角度集中度は本アプリ独自の指標で、ISOのStrではありません。','example-note example-full'));
     }
-    else if(topic==='surface'){note.textContent='説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Jet表示。図の数値はアプリと同じ解析処理で計算します。';text=id==='flat'?'平らなら全点が同じ色。周期的な筋は縞、ランダムな凹凸はまだら、局所的な谷は小さな斑点になります。':'色の並びから凹凸の位置と広がりを見て、断面で実際の高さを確かめましょう。';surface();profiles('② X方向で切った断面',[profile(data)],'Y = 300 µmを通る横線。深い谷も、この線が谷を通らなければ見えません。');}
+    else if(topic==='surface'){note.textContent='説明用の合成データです（実測DATではありません）。320 × 240点、画素間隔2.5 µm、Spectrum表示。図の数値はアプリと同じ解析処理で計算します。';text=id==='flat'?'平らなら全点が同じ色。周期的な筋は縞、ランダムな凹凸はまだら、局所的な谷は小さな斑点になります。':'色の並びから凹凸の位置と広がりを見て、断面で実際の高さを確かめましょう。';surface();profiles('② X方向で切った断面',[profile(data)],'Y = 300 µmを通る横線。深い谷も、この線が谷を通らなければ見えません。');}
     else if(topic==='profile'){text='切る方向で見える周期が変わります。筋を横切る線では波が現れ、筋に沿う線では高さがほぼ変わりません。';surface('① 切る位置・向き',data,'緑 = X方向、橙 = Y方向、紫 = 斜めの任意線。',{lines:true});profiles('② 3方向の断面を重ねる',['x','y','arbitrary'].map((d,i)=>({...profile(data,d),color:colors[i]})),'緑：X ／ 橙：Y ／ 紫：任意。横軸は各線の始点からの実距離。斜め線は長くなります。');}
     else if(topic==='psd'){text=id==='short'||id==='long'?`筋の間隔が${id==='short'?100:200} µmなら、同じ波長にPSDの山が現れます。100と200 µmの例はSqが同じでもピーク位置が違います。`:'周期が一定でない面は、PSDが広い波長に分布します。局所的な谷も一つの周期だけでは表せません。';surface();profiles('② X方向の断面',[profile(data)],'周期と高さを目で確かめます。');psds('③ X方向の標準PSD',[psdSeries(p)],'矩形窓・各ラインの平均除去。横軸は波長、縦軸は周波数に対する密度。');}
     else if(topic==='fft'||topic==='radial'||topic==='xy'){text='筋の向きと、凹凸が繰り返す向きは90°違います。縦筋の例ではX方向だけに高さが変化します。';surface();const s=fftPanel(grid,data);if(topic==='radial')psdPanel(grid,'③ 方向をまとめた放射平均',[{x:Float64Array.from(s.frequencies,f=>1/f),y:s.radial}],'同じ半径の2D PSDを平均。方向情報が消えるため、2D画像と併せて判断します。','2D PSD [nm²·µm²]');if(topic==='xy')psds('③ X / Yの標準PSD',[psdSeries(p),psdSeries(examplePSD(data,'y'))],'緑 = X、橙 = Y。高さが変化しない方向のPSDは0（表示下限）です。');}
@@ -239,7 +237,7 @@ export function renderExamples(topic,host) {
     else if(topic==='filter'){const filtered=exampleHighPass(data);text='カットオフ40 µmのHigh Passで、80 µmのうねりが弱くなり、20 µmの筋が残ります。Gaussianなので境界で一気には切れません。';surface('① 元の表面',data,statsText(data),{limit:4.5});surface('② High Pass後',filtered,statsText(filtered),{limit:4.5});psds('③ どの波長が弱くなったか',[psdSeries(p),psdSeries(examplePSD(filtered))],'緑 = 元の面、橙 = フィルター後。周期境界の説明例。アプリで同じ比較をするにはPSD入力を「マップと同じ補正後」にします。');}
     else if(topic==='window'){surface();if(id==='leakage'){text='23 µmの波は800 µmの測定周期に整数回収まらず、端がつながりません。Hann窓は遠い波長への漏れを抑えますが、山の周辺を広げます。';psds('② 矩形窓とHann窓',[psdSeries(p),psdSeries(examplePSD(data,'x','hann'))],'緑 = 矩形窓、橙 = Hann窓。ピーク高さだけを比べず、窓の条件を揃えます。');}else {text='帯状の欠損では全てのXラインに穴があるため、ライン除外では使えるXラインが0本です。補間しても失われた周期を正確には復元できません。';psds('② 欠損なしと線形補間',[psdSeries(examplePSD(exampleSurface('short'))),psdSeries(p)],'緑 = 欠損なし、橙 = 欠損を直線で補間。欠損が人工的な周期成分を作ります。');}}
     else if(topic==='clip'){const clipped=data.map(z=>Math.max(-2,Math.min(2,z)));text='高さを±2 nmに切り詰めると、滑らかな波の山と谷が平らになります。この形の変化が、本来なかった短い波長の成分を作ります。';profiles('① クリップ前後の断面',[profile(data),profile(clipped)],'緑 = 振幅6 nmの元の波、橙 = ±2 nmクリップ。');psds('② 新しい周期成分が出る',[psdSeries(p),psdSeries(examplePSD(clipped))],'20 µmだけだったPSDに、約6.67 µm（3倍の周波数）などの山が加わります。');}
-    else if(topic==='intensity'){const intensity=Float64Array.from({length:data.length},(_,i)=>220-180*Math.exp(-(((i%COLS)*DX-CX)**2+(Math.floor(i/COLS)*DX-CY)**2)/(2*15**2)));text='同じ平らな高さでも、反射や測定状態でカメラの明るさは違って見えます。暗い斑点をそのまま「深い穴」と読んではいけません。';surface('① 高さは平坦',data,'全点0 nm。');surface('② 明るさが変わる模式画像',intensity,'明るさをJetで色表示した説明用の模式図です。装置の光学モデルではなく、高さへの換算はできません。',{range:[0,255],label:'明るさ [相対値]'});}
+    else if(topic==='intensity'){const intensity=Float64Array.from({length:data.length},(_,i)=>220-180*Math.exp(-(((i%COLS)*DX-CX)**2+(Math.floor(i/COLS)*DX-CY)**2)/(2*15**2)));text='同じ平らな高さでも、反射や測定状態でカメラの明るさは違って見えます。暗い斑点をそのまま「深い穴」と読んではいけません。';surface('① 高さは平坦',data,'全点0 nm。');surface('② 明るさが変わる模式画像',intensity,'明るさをSpectrumで色表示した説明用の模式図です。装置の光学モデルではなく、高さへの換算はできません。',{range:[0,255],label:'明るさ [相対値]'});}
     else if(topic==='slope'){text='高さが急に変わる場所ほど微分が大きくなります。縦筋ならX微分に縞が現れ、Y微分はほぼ0になります。';surface();for(const direction of ['x','y'])surface(`${direction==='x'?'②':'③'} ${direction.toUpperCase()}方向微分`,exampleSlope(data,direction),'筋の山・谷では傾き0、山と谷の間では傾きが大きい。',{label:'傾き [nm/µm]'});}
     else if(topic==='distribution'){
       text=id==='random'?'ランダムな凹凸は左右がほぼ対称な高さ分布になります。この有限サンプルではSskは0付近、Skuは3付近です。':id==='valley'?`この谷は中心だけが深く、斜面の高さは連続的に変わります。全${data.length}点中、−20 nm以下は${data.filter(z=>z<=-20).length}点、−24 nm以下は${data.filter(z=>z<=-24).length}点。−25 nm付近に大きな山がなくても正常です。少数の深い点が低い側の裾になり、Sskは負、Skuは大きくなります。「底がほぼ平らな広い谷」と比べてみましょう。`:id==='flat-valley'?'比較用に、半径112.5 µmの円内を一様に25 nm下げました（周囲と同じランダム凹凸を重ねています）。底の面積が広いため、−25 nm付近にも多くの点が集まり、0 nm付近と二つの山になります。高さ分布が数えるのは深さの最大値ではなく、その高さにある点の数です。':'高い突起が加わると高い高さ側へ裾が伸び、Sskは正に傾きます。突起の頂点に近い点が少なければ、高い側に別の大きな山はできません。';
