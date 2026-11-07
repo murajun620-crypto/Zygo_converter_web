@@ -47,10 +47,34 @@ export function surfaceStats(data) {
   return {n, mean, min, max, pv: max - min, sq: Math.sqrt(m2 / n), sa: abs / n, validPercent: n / data.length * 100};
 }
 
+// Rectangle coordinates use the displayed map (y=0 at the bottom), in micrometres.
+export function regionPixelBounds({cols,rows,dx},region) {
+  if(!region||!['x0','x1','y0','y1'].every(k=>Number.isFinite(region[k]))||!(dx>0)||region.x0<0||region.y0<0||region.x1>(cols-1)*dx||region.y1>(rows-1)*dx||region.x1<=region.x0||region.y1<=region.y0)throw Error('補正範囲はマップ内で X最小 < X最大、Y最小 < Y最大にしてください。');
+  const x0=Math.ceil(region.x0/dx-1e-9),x1=Math.floor(region.x1/dx+1e-9),y0=Math.ceil(region.y0/dx-1e-9),y1=Math.floor(region.y1/dx+1e-9);
+  if(x1<=x0||y1<=y0)throw Error('平面を求めるには縦横それぞれ2画素以上を囲んでください。');
+  return {x0,x1,y0,y1};
+}
+export function fitRegionPlane(parsed,region) {
+  const {cols,rows,dx,phase}=parsed,b=regionPixelBounds(parsed,region),cx=(b.x0+b.x1)/2,cy=(b.y0+b.y1)/2,sx=(b.x1-b.x0)/2,sy=(b.y1-b.y0)/2;
+  const matrix=Array.from({length:3},()=>[0,0,0]),rhs=[0,0,0];let n=0,reference;
+  for(let y=b.y0;y<=b.y1;y++)for(let x=b.x0;x<=b.x1;x++){
+    const z=phase[(rows-1-y)*cols+x];if(!Number.isFinite(z))continue;
+    reference??=z;const v=[(x-cx)/sx,(y-cy)/sy,1];n++;
+    for(let i=0;i<3;i++){rhs[i]+=(z-reference)*v[i];for(let j=0;j<3;j++)matrix[i][j]+=v[i]*v[j];}
+  }
+  if(n<3)throw Error('選択範囲の有効点が3点未満です。欠損を避けて平坦な内側を囲んでください。');
+  let a,c;try{a=solve3(matrix,rhs);a[2]+=reference;}catch{throw Error('選択範囲の有効点が一直線上にあるため平面を決定できません。範囲を広げてください。');}
+  c=[a[0]/sx*(cols-1),-a[1]/sy*(rows-1),a[2]+a[0]*((cols-1)/2-cx)/sx+a[1]*((rows-1)/2-cy)/sy];
+  let squared=0;for(let y=b.y0;y<=b.y1;y++)for(let x=b.x0;x<=b.x1;x++){const z=phase[(rows-1-y)*cols+x];if(Number.isFinite(z))squared+=(z-(a[0]*(x-cx)/sx+a[1]*(y-cy)/sy+a[2]))**2;}
+  return {coefficients:c,planeFit:{method:'least squares on finite pixel centres within rectangle; subtract from entire original surface',rectangle_um:{...region},pixel_bounds_inclusive:b,valid_points:n,total_pixels:(b.x1-b.x0+1)*(b.y1-b.y0+1),center_um:{x:cx*dx,y:cy*dx},height_at_center_nm:a[2],slope_x_nm_per_um:a[0]/(sx*dx),slope_y_nm_per_um:a[1]/(sy*dx),residual_rms_nm:Math.sqrt(squared/n),coordinate_system:'display map: x right, y up; missing pixels unchanged'}};
+}
+
 export function prepareSurface(parsed, options = DEFAULT_OPTIONS) {
   const {cols, rows, phase} = parsed, coefficients = [0, 0, 0];
   const form = options.form ?? (options.plane ? 'plane' : 'none');
-  if (form !== 'plane') {
+  const regional=form==='roi-plane'?fitRegionPlane(parsed,options.planeROI):null;
+  if(regional)coefficients.splice(0,3,...regional.coefficients);
+  if (form !== 'plane' && !regional) {
     const fitted = removeForm(phase, cols, rows, form), rawSurface = filterSurface(fitted.rawSurface, cols, rows, parsed.dx, options);
     const surface = Float64Array.from(rawSurface, z => options.clip ? Math.max(-options.limit, Math.min(options.limit, z)) : z);
     let clipped = 0; for (let i=0;i<surface.length;i++) if(Number.isFinite(rawSurface[i])&&surface[i]!==rawSurface[i])clipped++;
@@ -74,9 +98,9 @@ export function prepareSurface(parsed, options = DEFAULT_OPTIONS) {
     surface[i] = options.clip ? Math.max(-options.limit, Math.min(options.limit, z)) : z;
     if (Number.isFinite(z) && surface[i] !== z) clipped++;
   }
-  const filtered = filterSurface(rawSurface, cols, rows, parsed.dx, options);
-  clipped = 0; for(let i=0;i<surface.length;i++){surface[i]=options.clip?Math.max(-options.limit,Math.min(options.limit,filtered[i])):filtered[i];if(Number.isFinite(filtered[i])&&surface[i]!==filtered[i])clipped++;}
-  return {surface, rawSurface: filtered, coefficients, clipped, stats: surfaceStats(filtered)};
+  const filtered = regional?rawSurface:filterSurface(rawSurface, cols, rows, parsed.dx, options);
+  clipped = 0; for(let i=0;i<surface.length;i++){surface[i]=!regional&&options.clip?Math.max(-options.limit,Math.min(options.limit,filtered[i])):filtered[i];if(Number.isFinite(filtered[i])&&surface[i]!==filtered[i])clipped++;}
+  return {surface, rawSurface: filtered, coefficients, clipped, stats: surfaceStats(filtered),...(regional?{planeFit:regional.planeFit}:{})};
 }
 
 function radixFFT(re, im, inverse = false) {
@@ -141,6 +165,7 @@ export function computePSD(data, cols, rows, dx, options) {
 
 export function analyze(parsed, opts = {}) {
   const options = {...DEFAULT_OPTIONS, ...opts};
+  if(options.form==='roi-plane'){options.filter='off';options.clip=false;options.plane=false;}
   if(options.researchWindow&&!['boxcar','hann'].includes(options.researchWindow))throw new Error('特徴解析の窓設定が不正です。');
   if (!['legacy', 'density'].includes(options.mode) || !['x', 'y'].includes(options.direction) || !['boxcar', 'hann'].includes(options.window) || !['skip', 'interpolate'].includes(options.missing) || !Number.isFinite(options.limit) || options.limit <= 0) throw new Error('解析設定が不正です。');
   // Preserve the original API default for numerical compatibility; the UI explicitly
@@ -154,6 +179,7 @@ export function analyze(parsed, opts = {}) {
   const psdConditions = {input:options.psdInput, form:options.psdInput==='processed'?(options.form??(options.plane?'plane':'none')):options.psdInput==='plane'?'plane':'none',
     filter:options.psdInput==='processed'?(options.filter??'off'):'off', clip:options.psdInput==='processed'&&options.clip,
     clipped:options.psdInput==='processed'?prepared.clipped:0};
+  if(options.psdInput==='processed'&&prepared.planeFit)psdConditions.planeFit=prepared.planeFit;
   const psd = computePSD(baseline.surface, parsed.cols, parsed.rows, parsed.dx, options);
   const research = researchAnalysis(baseline.surface, parsed.cols, parsed.rows, parsed.dx, options.researchWindow ?? 'hann', prepared.rawSurface);
   return {...parsed, ...prepared, options, psdConditions, psd, research};
@@ -173,4 +199,14 @@ export function syntheticDat() {
   const cols = 320, rows = 240, dx = 2.5, phase = new Float64Array(cols * rows), intensity = new Float64Array(cols * rows);
   for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {const i = y * cols + x; phase[i] = 4 * Math.sin(2 * Math.PI * 8 * x / cols) + 2 * Math.cos(2 * Math.PI * 5 * y / rows) + 0.05 * x + 0.025 * y; intensity[i] = 170 + 35 * Math.sin(x / 12) * Math.cos(y / 18);}
   return {name: 'DEMO · 合成表面', cols, rows, dx, phase, intensity, iw: cols, ih: rows, meta: {format: 'synthetic', wavelength_nm: 632.8, valid: phase.length, total: phase.length, timestamp: 0}};
+}
+
+export function syntheticWaferDat() {
+  const cols=320,rows=240,dx=2.5,phase=new Float64Array(cols*rows);
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    const xx=x*dx,yy=(rows-1-y)*dx,edge=Math.max(0,(xx-600)/197.5);
+    const hole=(xx>690&&xx<725&&yy>160&&yy<245)||(xx>240&&xx<260&&yy>290&&yy<310);
+    phase[y*cols+x]=hole?NaN:20+.04*xx+.02*yy-120*edge**2;
+  }
+  return {name:'DEMO · Siウェハ端部（合成）',cols,rows,dx,phase,intensity:new Float64Array(),iw:0,ih:0,meta:{format:'synthetic wafer edge',valid:phase.filter(Number.isFinite).length,total:phase.length}};
 }

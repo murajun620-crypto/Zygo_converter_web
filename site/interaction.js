@@ -1,5 +1,9 @@
 // Coordinates are physical micrometres; hit testing uses displayed CSS pixels.
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+export function rectangleFromPoints(start,end,width,height) {
+  const a={x:clamp(start.x,0,width),y:clamp(start.y,0,height)},b={x:clamp(end.x,0,width),y:clamp(end.y,0,height)};
+  return {x0:Math.min(a.x,b.x),x1:Math.max(a.x,b.x),y0:Math.min(a.y,b.y),y1:Math.max(a.y,b.y)};
+}
 export function lineDirection(p) {
   return Math.abs(p.y1-p.y0)<1e-8 ? 'x' : Math.abs(p.x1-p.x0)<1e-8 ? 'y' : 'arbitrary';
 }

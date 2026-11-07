@@ -1,17 +1,46 @@
-import {hitLine, dragLine, frameQueue} from './interaction.js';
+import {hitLine, dragLine, frameQueue, rectangleFromPoints} from './interaction.js?v=wafer-roi-2';
 import {datFiles, installFileDrop} from './upload.js';
-import {installHelp} from './help.js?v=vertical-periods-1';
+import {installHelp} from './help.js?v=wafer-roi-2';
 import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=auto-color-1';
-import {MAX_PIXELS} from './analysis.js';
+import {MAX_PIXELS,regionPixelBounds} from './analysis.js?v=wafer-roi-2';
 import {extractProfile, bandRMS, frequencyBands} from './advanced.js?v=frequency-bands-2';
-import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,fftMap,drawFFTProbe,surfaceColorRange} from './charts.js?v=histogram-1';
-import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js?v=frequency-bands-2';
+import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,fftMap,drawFFTProbe,surfaceColorRange} from './charts.js?v=wafer-roi-2';
+import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js?v=wafer-roi-2';
 const $ = id => document.getElementById(id);
 let results = [], failures = [], selected = 0, sources = new Map(), busy = false, exporting = false, worker, pending, nextId = 0, cancelled = false, activeTab = 'surface';
 let azimuth = -0.7, elevation = 0.65, profiles = [], profileSerial = 0;
 let fftRendered=null,fftSample=null,fftPinned=false;
+let roiMode=false,roiGesture=null,roiFileKey=null;
+const roiFields={x0:'roiX0',x1:'roiX1',y0:'roiY0',y1:'roiY1'};
 const canvasIds = ['surface2d', 'surface3d', 'profile', 'intensity', 'slope_x', 'slope_y', 'psdPlot', 'fftPlot', 'radialPlot', 'xyPSD', 'cumulativePlot', 'histogramPlot'];
 const active = () => results[selected];
+function roiDraft(r=active()){return r?(sources.get(r.key)?.roiDraft??r.options.planeROI??null):null;}
+function roiPlot(r=active()){const rect=roiDraft(r);return rect?{...rect,applied:Boolean(r?.planeFit&&['x0','x1','y0','y1'].every(k=>Math.abs(rect[k]-r.planeFit.rectangle_um[k])<1e-7))}:null;}
+function readROI(){return Object.fromEntries(Object.entries(roiFields).map(([k,id])=>[k,$(id).value===''?NaN:Number($(id).value)]));}
+function writeROI(rect){for(const [k,id] of Object.entries(roiFields))$(id).value=rect?rect[k]:'';}
+function roiOverlay(){const r=active();if(r)drawProfileLines($('surface2d'),profileLines(),roiPlot(r));}
+function renderROI(r){
+  if(roiFileKey!==r?.key){roiMode=false;roiFileKey=r?.key;}
+  $('surface2d').classList.toggle('roi-selecting',roiMode);
+  $('roiSelect').setAttribute('aria-pressed',String(roiMode));$('roiSelect').textContent=roiMode?'選択を終了（断面に戻る）':'範囲をドラッグ選択';
+  if(!r)return;
+  writeROI(roiDraft(r));
+  const fit=r.planeFit,rect=roiDraft(r),different=fit&&rect&&['x0','x1','y0','y1'].some(k=>Math.abs(rect[k]-fit.rectangle_um[k])>1e-7);
+  $('roiDetails').textContent=fit?`${different?'新しい範囲は未適用。現在の補正: ':'適用済み · '}有効 ${fit.valid_points} / ${fit.total_pixels} 点\nX ${fit.rectangle_um.x0.toFixed(2)}〜${fit.rectangle_um.x1.toFixed(2)} / Y ${fit.rectangle_um.y0.toFixed(2)}〜${fit.rectangle_um.y1.toFixed(2)} µm\n傾き X ${fit.slope_x_nm_per_um.toPrecision(6)} / Y ${fit.slope_y_nm_per_um.toPrecision(6)} nm/µm · 範囲内の残差RMS ${fit.residual_rms_nm.toPrecision(5)} nm\n元の全画素から平面のみを差し引きました。`:rect?'範囲選択済み（未適用）。「この範囲で傾斜補正」を押してください。':'「範囲をドラッグ選択」で、ダレを含まない平坦な内側を囲んでください。';
+}
+async function applyROI(reset=false){
+  const r=active(),source=r&&sources.get(r.key);if(!r||!source||busy||exporting)return;
+  let rect,options;try{rect=reset?null:readROI();if(rect)regionPixelBounds(r,rect);options={...r.options,form:reset?'none':'roi-plane',plane:false,planeROI:rect,filter:'off',clip:false};}catch(e){notify(e.message,true);return;}
+  roiMode=false;busy=true;cancelled=false;buttons();renderROI(r);notify('元データから傾斜補正を計算中…');
+  try{
+    const next=await calculate(source,options);if(cancelled)return;next.key=r.key;
+    const index=results.findIndex(v=>v.key===r.key);if(index<0)return;
+    results[index]=next;source.planeROI=rect;if(rect)source.roiDraft={...rect};
+    $('form').value=options.form;$('filter').value='off';$('clip').checked=false;modeUI();renderFiles();renderActive();
+    notify(reset?'元の高さデータに戻しました（形状補正・FFTフィルター・クリップなし）。':'指定した内側の有効点だけで平面を求め、全体から差し引きました。');
+  }catch(e){notify(`傾斜補正を適用できませんでした。現在の結果は保持しています。\n${e.message}`,true);}
+  finally{busy=false;buttons();}
+}
 function notify(message, error = false) {$('notification').textContent = message; $('notification').classList.toggle('error', error); $('notification').hidden = !message;}
 function getOptions() {
   const limit = Number($('limit').value); if (!Number.isFinite(limit) || limit <= 0 || limit > 1e6) throw new Error('クリップ上限は 0 より大きく、1,000,000 nm 以下で指定してください。');
@@ -22,20 +51,23 @@ let appliedDisplayLimit=null;
 function displayLimit() {if($('displayLimit').checkValidity())appliedDisplayLimit=$('displayLimit').value===''?null:Number($('displayLimit').value);return appliedDisplayLimit;}
 const autoSurfaceRanges=new WeakMap();
 function surfaceRange(r){const limit=displayLimit();if(limit!==null)return surfaceColorRange([],limit);if(!autoSurfaceRanges.has(r))autoSurfaceRanges.set(r,surfaceColorRange(r.surface));return autoSurfaceRanges.get(r);}
-function paintSurface(r,canvases,lines){const range=surfaceRange(r);heatmap(canvases.surface2d,r.surface,r.cols,r.rows,r.dx,{range,colormap:$('colormap').value,lines});surface3d(canvases.surface3d,r,{azimuth,elevation,range,colormap:$('colormap').value});if(canvases.surface2d===$('surface2d'))$('surfaceColorHint').textContent=`${range.mode==='auto'?'Auto（全域のmin〜max）':'指定範囲'}: ${range.min.toPrecision(5)}〜${range.max.toPrecision(5)} nm · 2D / 3D共通。空欄でAuto。数値入力で±指定値。`;}
+function paintSurface(r,canvases,lines){const range=surfaceRange(r);heatmap(canvases.surface2d,r.surface,r.cols,r.rows,r.dx,{range,colormap:$('colormap').value,lines});surface3d(canvases.surface3d,r,{azimuth,elevation,range,colormap:$('colormap').value});if(canvases.surface2d===$('surface2d'))drawProfileLines(canvases.surface2d,lines,roiPlot(r));if(canvases.surface2d===$('surface2d'))$('surfaceColorHint').textContent=`${range.mode==='auto'?'Auto（全域のmin〜max）':'指定範囲'}: ${range.min.toPrecision(5)}〜${range.max.toPrecision(5)} nm · 2D / 3D共通。空欄でAuto。数値入力で±指定値。`;}
 function modeUI() {
+  const roi=$('form').value==='roi-plane';if(roi){$('filter').value='off';$('clip').checked=false;}$('filter').disabled=roi;$('clip').disabled=roi;
   $('filterOptions').hidden = $('filter').value === 'off'; $('cutoffLow').disabled = $('filter').value === 'lowpass'; $('cutoffHigh').disabled = $('filter').value === 'highpass';
   $('psdInputHint').textContent=$('psdInput').value==='processed'?'マップと同じ形状補正・FFTフィルター・クリップを適用します。補正でスペクトルも変わります。':$('psdInput').value==='raw'?'未補正の高さ。FFTフィルター・クリップなし。傾きによる長波長成分を含みます。':'平面補正のみ。FFTフィルター・高さクリップは適用しません。';
   const legacy = $('mode').value === 'legacy'; $('standardOptions').hidden = legacy;
   $('modeHint').textContent = legacy ? '元コードと同じ FFT・係数・ゼロ埋め。入力は別設定です。元処理の再現には「マップと同じ補正後」を選びます。' : '各ラインの平均を除去。窓のエネルギーで正規化し、Nyquist 成分も含めた片側 PSD を計算します。';
 }
 function buttons() {
+  document.querySelectorAll('#fileList button').forEach(b=>b.disabled=busy||exporting);
+  $('waferDemo').disabled=busy;for(const id of ['roiSelect','roiApply','roiReset',...Object.values(roiFields)])$(id).disabled=busy||exporting||!active();
   $('files').disabled = busy; $('demo').disabled = busy; $('testData').disabled = busy; $('reanalyze').disabled = busy || !results.length; $('downloadAll').disabled = busy || exporting || !results.length;
   for (const id of ['excel', 'meanCSV', 'surfaceCSV', 'parameters', 'singleZip', 'summary', 'remove']) $(id).disabled = busy || exporting;
   document.querySelectorAll('[data-png], #profileExcel, #psdExcel, #compareExcel, #researchExcel, #frequencyApply, #bandExcel, #fftCSV, #addProfile').forEach(b => b.disabled = busy || exporting || !results.length);
 }
 function startWorker() {
-  worker = new Worker(new URL('./worker.js?v=frequency-bands-2', import.meta.url), {type: 'module'});
+  worker = new Worker(new URL('./worker.js?v=wafer-roi-2', import.meta.url), {type: 'module'});
   worker.onmessage = ({data}) => {if (pending && pending.id === data.id) {const p = pending; pending = null; data.error ? p.reject(new Error(data.error)) : p.resolve(data.result);}};
   worker.onerror = event => {if (pending) {pending.reject(new Error(event.message || '解析 Worker の起動に失敗しました。')); pending = null;} worker.terminate(); worker = null;};
 }
@@ -48,6 +80,7 @@ async function processQueue(queue, replace = false) {
   let options; try {options = getOptions();} catch (e) {notify(e.message, true); return;}
   if (queue.length > 20 || (!replace && results.length + queue.length > 20)) {notify('一度に保持できるデータは 20 件です。結果を保存・削除してから追加してください。', true); return;}
   if (queue.reduce((s, q) => s + (q.file?.size ?? q.buffer?.byteLength ?? 0), 0) > 64 * 1024 * 1024) {notify('一回の選択は合計 64 MB 以下にしてください。', true); return;}
+  if(replace&&options.form==='roi-plane'&&queue.some(source=>!source.planeROI)){notify('内側範囲からの一括再解析には、各ファイルで先に範囲を指定して適用してください。現在の結果は保持しています。',true);return;}
   if (replace) {results = []; failures = []; sources = new Map(); selected = 0;}
   busy = true; cancelled = false; buttons(); notify(''); $('progressArea').hidden = false; $('progress').max = queue.length;
   let totalPixels = results.reduce((s, r) => s + r.surface.length, 0), added = 0;
@@ -57,7 +90,8 @@ async function processQueue(queue, replace = false) {
       try {
         if (source.file) {if (source.file.size > 32 * 1024 * 1024) throw new Error('1 ファイルの上限は 32 MB です。'); source.buffer = await source.file.arrayBuffer(); delete source.file;}
         if (cancelled) break;
-        const result = await calculate(source, options); if (cancelled) break;
+        const sourceOptions=options.form==='roi-plane'?{...options,form:source.planeROI?'roi-plane':'none',planeROI:source.planeROI??null,filter:'off',clip:false}:options;
+        const result = await calculate(source, sourceOptions); if (cancelled) break;
         if (totalPixels + result.surface.length > MAX_PIXELS) throw new Error('保持する全データの合計上限（200 万点）を超えました。結果を保存・削除してから追加してください。');
         totalPixels += result.surface.length; const key = source.key ?? crypto.randomUUID(); source.key = key; result.key = key; sources.set(key, source); results.push(result); selected = results.length - 1; added++;
         renderFiles(); renderActive();
@@ -68,7 +102,7 @@ async function processQueue(queue, replace = false) {
 }
 function renderFiles() {
   $('fileCount').textContent = `${results.length} FILES`; const list = $('fileList'); list.replaceChildren();
-  results.forEach((r, i) => {const b = document.createElement('button'); b.className = 'file-item' + (i === selected ? ' active' : ''); b.type = 'button'; const icon = document.createElement('span'); icon.className = 'file-icon'; icon.textContent = 'DAT'; const label = document.createElement('span'), name = document.createElement('strong'), meta = document.createElement('small'); name.textContent = r.name; meta.textContent = `${r.cols} × ${r.rows} · ${r.dx.toFixed(4)} µm`; label.append(name, meta); b.append(icon, label); b.title = r.name; b.onclick = () => {selected = i; renderFiles(); renderActive();}; list.append(b);});
+  results.forEach((r, i) => {const b = document.createElement('button'); b.className = 'file-item' + (i === selected ? ' active' : ''); b.type = 'button'; const icon = document.createElement('span'); icon.className = 'file-icon'; icon.textContent = 'DAT'; const label = document.createElement('span'), name = document.createElement('strong'), meta = document.createElement('small'); name.textContent = r.name; meta.textContent = `${r.cols} × ${r.rows} · ${r.dx.toFixed(4)} µm`; label.append(name, meta); b.append(icon, label); b.title = r.name; b.onclick = () => {if(busy||exporting)return;selected = i; renderFiles(); renderActive();}; list.append(b);});
   for (const f of failures) {const p = document.createElement('p'); p.className = 'failed-item'; p.textContent = `${f.name}: ${f.error}`; list.append(p);}
   if (!results.length && !failures.length) {const p = document.createElement('p'); p.className = 'muted small'; p.textContent = 'ファイルを選ぶと、ここに解析結果が並びます。'; list.append(p);}
   $('compareCount').textContent = results.length;
@@ -88,11 +122,11 @@ function paint(r, canvases, row = Math.min(r.rows - 1, Math.floor(r.rows / 2) + 
 function renderActive() {
   const r = active(); $('empty').hidden = Boolean(r); $('results').hidden = !r; if (!r) {buttons(); return;}
   $('activeName').textContent = r.name; $('activeMeta').textContent = `${r.cols} × ${r.rows} pixels　 /　${((r.cols - 1) * r.dx).toFixed(1)} × ${((r.rows - 1) * r.dx).toFixed(1)} µm　 /　d = ${r.dx.toFixed(5)} µm`;
-  const forms={none:'なし',piston:'平均高さ',plane:'平面',sphere:'球面（2次近似）','cylinder-x':'X曲率円筒（2次近似）','cylinder-y':'Y曲率円筒（2次近似）',quadratic:'一般2次曲面'},o=r.options; $('correctionDetails').textContent=`適用済み: 形状 ${forms[o.form??(o.plane?'plane':'none')]} / FFT ${o.filter??'off'}${o.filter&&o.filter!=='off'?` · fcLow ${o.cutoffLow.toPrecision(4)} / fcHigh ${o.cutoffHigh.toPrecision(4)} 1/µm · ${o.rolloff} · ${o.edge}`:''}`;
+  const forms={none:'なし',piston:'平均高さ',plane:'平面','roi-plane':'内側範囲の平面',sphere:'球面（2次近似）','cylinder-x':'X曲率円筒（2次近似）','cylinder-y':'Y曲率円筒（2次近似）',quadratic:'一般2次曲面'},o=r.options; $('correctionDetails').textContent=`適用済み: 形状 ${forms[o.form??(o.plane?'plane':'none')]} / FFT ${o.filter??'off'}${o.filter&&o.filter!=='off'?` · fcLow ${o.cutoffLow.toPrecision(4)} / fcHigh ${o.cutoffHigh.toPrecision(4)} 1/µm · ${o.rolloff} · ${o.edge}`:''}`;
   for (const [id, value] of Object.entries({sq: r.stats.sq, sa: r.stats.sa, pv: r.stats.pv, valid: r.stats.validPercent})) $(id).textContent = value.toFixed(id === 'valid' ? 1 : 3);
   if($('row').dataset.key!==r.key){$('row').dataset.key=r.key;resetDraft(r);}
   configureProfile(r); paint(r,Object.fromEntries(canvasIds.map(id=>[id,$(id)])),Number($('row').value));
-  renderProfileList(); renderResearchDetails(r);
+  renderProfileList(); renderResearchDetails(r); renderROI(r);roiOverlay();
   document.querySelectorAll('.slope-note').forEach(el => el.textContent = r.options.mode === 'legacy' ? '元コード互換 · nm/pixel · |微分| > 10 を 0 に置換' : 'サンプリング間隔で換算 · nm/µm · 中央差分');
   const p = r.psd, sc=r.psdConditions;
   $('psdDetails').textContent = `${r.options.mode === 'legacy' ? '元コード互換' : '標準片側 PSD'} / ${p.direction.toUpperCase()} 方向　｜　使用 ${p.used} / ${p.lines} ライン　｜　Δf = ${p.df.toPrecision(5)} 1/µm　｜　Nyquist = ${p.nyquist.toPrecision(5)} 1/µm\n${r.options.mode === 'legacy' ? `ゼロ埋め ${p.zeroFilled} ライン。DC と Nyquist を除外。` : `欠損で除外 ${p.skipped} / 補間 ${p.interpolated} ライン。ライン平均を除去。窓: ${r.options.window}。`}${sc.clip ? ` 高さを ±${r.options.limit} nm にクリップ（${sc.clipped} 点）。` : ' 高さのクリップなし。'}
@@ -197,12 +231,13 @@ $('emptyOpen').onclick = () => $('files').click();
 $('dropzone').onkeydown = e => {if(e.key==='Enter'||e.key===' '){e.preventDefault();if(!busy)$('files').click();}};
 const resetDrop=installFileDrop(document,{show:()=>{$('dropOverlay').hidden=false;$('dropzone').classList.add('dragging');},hide:()=>{$('dropOverlay').hidden=true;$('dropzone').classList.remove('dragging');},receive:receiveFiles,blocked:()=>busy});
 window.addEventListener('blur',resetDrop);
+$('waferDemo').onclick=()=>processQueue([{name:'DEMO · Siウェハ端部（合成）',synthetic:'wafer-edge'}]);
 $('demo').onclick = () => processQueue([{name: 'DEMO · 合成表面', synthetic: true}]);
 $('testData').onclick = async () => {try {const response = await fetch('/__test-data'); if (!response.ok) throw new Error('ローカルのテスト DAT を取得できません。'); await processQueue([{name: 'E17-C1-1-1.dat', buffer: await response.arrayBuffer()}]);} catch (e) {notify(e.message, true);}};
 if (['localhost', '127.0.0.1'].includes(location.hostname)) fetch('/__test-data', {method: 'HEAD'}).then(r => {if (r.ok) $('testData').hidden = false;}).catch(() => {});
 $('settings').onsubmit = e => {e.preventDefault(); const queue = results.map(r => sources.get(r.key)); processQueue(queue, true);};
 $('settings').onchange = () => {modeUI(); if (results.length && !busy) notify('解析設定が変更されています。「設定を適用して再解析」で結果に反映してください。');};
-$('mode').addEventListener('change', () => {$('clip').checked = $('mode').value === 'legacy';});
+$('mode').addEventListener('change', () => {$('clip').checked = $('mode').value === 'legacy';modeUI();});
 $('cancel').onclick = () => {cancelled = true; worker?.terminate(); worker = null; pending?.reject(new Error('中止')); pending = null;};
 $('remove').onclick = () => {const r = active(); sources.delete(r.key); profiles=profiles.filter(p=>p.key!==r.key); results.splice(selected, 1); selected = Math.min(selected, Math.max(0, results.length - 1)); renderFiles(); renderActive();};
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => selectTab(b.dataset.tab));
@@ -212,7 +247,7 @@ $('displayLimit').onchange=()=>{if(!$('displayLimit').checkValidity()){notify('�
 $('surfaceColorAuto').onclick=()=>{$('displayLimit').value='';surfaceColorFrame.push(true);};
 function profileLines(){const r=active();return r?[...profiles.filter(p=>p.key===r.key&&p.visible),draftLine(r)]:[];}
 function paintProfiles(){
-  const r=active();if(!r)return;drawProfileLines($('surface2d'),profileLines());configureProfile(r);
+  const r=active();if(!r)return;drawProfileLines($('surface2d'),profileLines(),roiPlot());configureProfile(r);
   if(Math.hypot(Number($('x1').value)-Number($('x0').value),Number($('y1').value)-Number($('y0').value))<1e-8)return;
   try{seriesChart($('profile'),profileSeries().map(p=>({x:p.distance,y:p.height,color:p.color,name:p.name})),{limits:profileAxes()});}catch(e){notify(e.message,true);}
 }
@@ -230,8 +265,30 @@ function updateGesture(point){
   paintProfiles();
 }
 const gestureFrame=frameQueue(updateGesture);
+function updateROIGesture(point){
+  const r=active();if(!roiGesture||r?.key!==roiGesture.key)return;
+  const rect=rectangleFromPoints(roiGesture.start,point,(r.cols-1)*r.dx,(r.rows-1)*r.dx);
+  sources.get(r.key).roiDraft=rect;writeROI(rect);roiOverlay();
+  $('roiDetails').textContent=`範囲を選択中 · X ${rect.x0.toFixed(2)}〜${rect.x1.toFixed(2)} / Y ${rect.y0.toFixed(2)}〜${rect.y1.toFixed(2)} µm。離して範囲を確定します。`;
+}
+const roiFrame=frameQueue(updateROIGesture);
+function endROIGesture(e,cancel=false){
+  if(!roiGesture||roiGesture.pointerId!==e.pointerId)return;
+  const g=roiGesture;
+  if(cancel){roiFrame.cancel();const source=sources.get(g.key);if(source)source.roiDraft=g.previous;}else{const p=mapPoint(e,true);if(p)roiFrame.push(p);roiFrame.flush();try{regionPixelBounds(active(),roiDraft());}catch(error){sources.get(g.key).roiDraft=g.previous;notify(error.message,true);}}
+  roiGesture=null;roiMode=false;const c=$('surface2d');if(c.hasPointerCapture(e.pointerId))c.releasePointerCapture(e.pointerId);
+  renderROI(active());roiOverlay();
+}
+$('roiSelect').onclick=()=>{if(!active()||busy||exporting)return;roiMode=!roiMode;renderROI(active());};
+$('roiApply').onclick=()=>applyROI();$('roiReset').onclick=()=>applyROI(true);
+for(const id of Object.values(roiFields))$(id).onchange=()=>{
+  const r=active();if(!r||busy)return;
+  try{const rect=readROI();regionPixelBounds(r,rect);sources.get(r.key).roiDraft=rect;renderROI(r);roiOverlay();}catch(e){$('roiDetails').textContent=e.message;}
+};
+window.addEventListener('keydown',e=>{if(e.key==='Escape'&&roiGesture)endROIGesture({pointerId:roiGesture.pointerId},true);else if(e.key==='Escape'&&roiMode){roiMode=false;renderROI(active());}});
 $('surface2d').onpointerdown=e=>{
   const point=mapPoint(e),r=active();if(!point||!r||busy||e.button!==0||gesture)return;
+  if(roiMode){if(roiGesture)return;roiGesture={key:r.key,start:point,previous:roiDraft(r),pointerId:e.pointerId};$('surface2d').setPointerCapture(e.pointerId);e.preventDefault();return;}
   profileFrame.flush();const c=$('surface2d'),area=c._plotArea,box=c.getBoundingClientRect();
   const hit=hitLine(point,profileLines(),area.w*box.width/c.width/((r.cols-1)*r.dx),area.h*box.height/c.height/((r.rows-1)*r.dx));
   const target=hit?.line.id?profiles.find(p=>p.id===hit.line.id):null,original={...(target??draftLine(r))};
@@ -243,11 +300,13 @@ $('surface2d').onpointerdown=e=>{
   if(!hit&&gesture.part!=='new')gestureFrame.push(point);
 };
 $('surface2d').onpointermove=e=>{
-  const point=mapPoint(e,Boolean(gesture)),r=active();if(!point||!r)return;
+  const point=mapPoint(e,Boolean(gesture||roiGesture)),r=active();if(!point||!r)return;
   const z=r.surface[Math.round(point.y/r.dx)*r.cols+Math.round(point.x/r.dx)];$('hoverValue').textContent=`x ${point.x.toFixed(2)} µm / y ${point.y.toFixed(2)} µm / z ${Number.isFinite(z)?z.toFixed(3)+' nm':'欠損'}`;
+  if(roiGesture&&roiGesture.pointerId===e.pointerId){roiFrame.push(point);return;}
   if(gesture&&gesture.pointerId===e.pointerId)gestureFrame.push(point);
 };
 function endGesture(e,cancel=false){
+  if(roiGesture){endROIGesture(e,cancel);return;}
   if(!gesture||gesture.pointerId!==e.pointerId)return;
   const g=gesture;if(cancel){gestureFrame.cancel();if(g.target)Object.assign(g.target,g.original);else setCoordinates(g.original);}else{
     const point=mapPoint(e,true);if(point)gestureFrame.push(point);gestureFrame.flush();
@@ -257,7 +316,7 @@ function endGesture(e,cancel=false){
 }
 $('surface2d').onpointerup=e=>endGesture(e);
 $('surface2d').onpointercancel=e=>endGesture(e,true);
-$('surface2d').onlostpointercapture=e=>{if(gesture)endGesture(e,true);};
+$('surface2d').onlostpointercapture=e=>{if(gesture||roiGesture)endGesture(e,true);};
 let dragging;
 $('surface3d').onpointerdown = e => {dragging = {x: e.clientX, y: e.clientY}; $('surface3d').setPointerCapture(e.pointerId);};
 $('surface3d').onpointermove = e => {if (!dragging || !active()) return; azimuth += (e.clientX - dragging.x) * 0.008; elevation = Math.max(0.15, Math.min(1.4, elevation + (e.clientY - dragging.y) * 0.008)); dragging = {x: e.clientX, y: e.clientY}; surface3d($('surface3d'), active(), {azimuth, elevation, range: surfaceRange(active()), colormap: $('colormap').value});};

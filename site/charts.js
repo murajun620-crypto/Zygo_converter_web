@@ -121,7 +121,7 @@ export function histogramChart(canvas,distribution) {
   c.save();c.beginPath();c.rect(f.left,f.top,f.w,f.h);c.clip();c.fillStyle=teal;for(let k=0;k<distribution.counts.length;k++){const x=f.X(distribution.centers[k]-step/2),w=Math.max(1,f.X(distribution.centers[k]+step/2)-x-1),y=f.Y(distribution.counts[k]);c.fillRect(x,y,w,f.top+f.h-y);}c.restore();
 }
 
-export function drawProfileLines(canvas, lines) {
+export function drawProfileLines(canvas, lines, roi=null) {
   const c=canvas.getContext('2d'),p=canvas._plotArea;if(!p||!canvas._surfaceBackground)return;
   c.clearRect(0,0,canvas.width,canvas.height);c.drawImage(canvas._surfaceBackground,0,0);
   const X=x=>p.left+x/((p.cols-1)*p.dx)*p.w,Y=y=>p.top+(1-y/((p.rows-1)*p.dx))*p.h;
@@ -129,7 +129,9 @@ export function drawProfileLines(canvas, lines) {
   c.save();c.lineWidth=1*scale;c.setLineDash([]);
   for(const q of lines){c.lineWidth=1.8*scale;line(c,X(q.x0),Y(q.y0),X(q.x1),Y(q.y1),'#ffffffb0');c.lineWidth=0.9*scale;line(c,X(q.x0),Y(q.y0),X(q.x1),Y(q.y1),q.color??teal);text(c,q.name??'',X(q.x0)+4,Y(q.y0)-7,'left',q.color??teal);
     if(q.direction==='arbitrary'||(q.x0!==q.x1&&q.y0!==q.y1)){c.fillStyle=q.color??teal;for(const [x,y] of [[q.x0,q.y0],[q.x1,q.y1]]){c.beginPath();c.arc(X(x),Y(y),2.5*scale,0,Math.PI*2);c.fill();}}
-  }c.restore();
+  }
+  if(roi){c.lineWidth=1.5*scale;c.strokeStyle='#087fa8';c.setLineDash([]);c.strokeRect(X(roi.x0),Y(roi.y1),X(roi.x1)-X(roi.x0),Y(roi.y0)-Y(roi.y1));text(c,roi.applied?'Plane fit ROI (applied)':'ROI selection (not applied)',X(roi.x0)+4,Y(roi.y1)-7,'left','#087fa8');}
+  c.restore();
 }
 
 const fftNumber=v=>v===0?'0':Math.abs(v)<.001||Math.abs(v)>=1e4?v.toExponential(2):Number(v.toFixed(4)).toString();
