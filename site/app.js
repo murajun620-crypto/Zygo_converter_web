@@ -1,12 +1,13 @@
-import {hitLine, dragLine, frameQueue, rectangleFromPoints, surfacePoint, surfaceMeasurement, profilePoint} from './interaction.js?v=metrology-ui-2';
+import {hitLine, dragLine, frameQueue, rectangleFromPoints, surfacePoint, surfaceMeasurement, profilePoint, versionFromHTML, updateURL} from './interaction.js?v=clean-ui-1';
 import {datFiles, installFileDrop} from './upload.js';
-import {installHelp} from './help.js?v=metrology-ui-2';
-import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=auto-color-1';
-import {MAX_PIXELS,regionPixelBounds} from './analysis.js?v=metrology-ui-2';
-import {extractProfile, bandRMS, frequencyBands} from './advanced.js?v=frequency-bands-2';
-import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,drawMeasurement,fftMap,drawFFTProbe,surfaceColorRange} from './charts.js?v=metrology-ui-2';
-import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js?v=metrology-ui-2';
+import {installHelp} from './help.js?v=clean-ui-1';
+import {fftView,parseWavelengths,displayColors,sampleSpectrum,pointerFrequency} from './fft-view.js?v=clean-ui-1';
+import {MAX_PIXELS,regionPixelBounds} from './analysis.js?v=clean-ui-1';
+import {extractProfile, bandRMS, frequencyBands} from './advanced.js?v=clean-ui-1';
+import {heatmap, surface3d, profileChart, slopeMap, psdChart, palette, setup, seriesChart, histogramChart, drawProfileLines,drawMeasurement,fftMap,drawFFTProbe,surfaceColorRange} from './charts.js?v=clean-ui-1';
+import {zip, csv, meanRows, metadata, psdWorkbook, summaryWorkbook, surfaceCSV, safeName, download, pngBytes, profileWorkbook, plotPSDWorkbook, spectrumCSV, researchWorkbook} from './export.js?v=clean-ui-1';
 const $ = id => document.getElementById(id);
+const APP_VERSION=document.querySelector('meta[name=app-version]').content;
 let results = [], failures = [], selected = 0, sources = new Map(), busy = false, exporting = false, worker, pending, nextId = 0, cancelled = false, activeTab = 'surface';
 let azimuth = -0.7, elevation = 0.65, profiles = [], profileSerial = 0;
 let fftRendered=null,fftSample=null,fftPinned=false;
@@ -17,14 +18,60 @@ const active = () => results[selected];
 let mapMeasureMode=false,profileMeasureMode=false;
 const mapMeasurements=new Map(),profileMeasurements=new Map();
 const measureNumber=n=>Number.isFinite(n)?Number(n.toPrecision(7)).toString():'計測不可（欠損）';
+function renderCompactStatus(r){
+  const forms={none:'なし',piston:'平均高さ',plane:'平面','roi-plane':'領域補正',sphere:'球面','cylinder-x':'円筒X','cylinder-y':'円筒Y',quadratic:'2次曲面'},o=r.options;
+  $('analysisBadges').replaceChildren();
+  for(const value of [`補正 ${forms[o.form??(o.plane?'plane':'none')]}`,`PSD ${r.psdConditions.input==='plane'?'平面のみ':r.psdConditions.input==='raw'?'未補正':'補正後'}`,`窓 ${r.research.window==='hann'?'Hann':'矩形'}`]){const b=document.createElement('span');b.textContent=value;b.tabIndex=0;b.dataset.tipSource='correctionDetails psdDetails';$('analysisBadges').append(b);}
+  $('heightSummary').textContent=`Ssk ${metric(r.research.distribution.ssk)} · Sku ${metric(r.research.distribution.sku)}`;
+  try{const b=bandSummary(r);$('bandSummary').textContent=`RMS  X ${metric(b.x.rms)} / Y ${metric(b.y.rms)} nm`;$('bandError').hidden=true;}catch(e){$('bandSummary').textContent='';$('bandError').textContent=e.message;$('bandError').hidden=false;}
+}
+function installTips(){
+  let sequence=0;
+  const connect=(target,source)=>{if(!target)return;const ids=new Set((target.dataset.tipSource??'').split(' ').filter(Boolean));ids.add(source.id);target.dataset.tipSource=[...ids].join(' ');};
+  const explicit={modeHint:$('mode'),psdInputHint:$('psdInput'),surfaceColorHint:$('surfaceInfo'),correctionDetails:$('analysisBadges'),psdDetails:document.querySelector('#psdPanel [data-help=psd]'),fftCursor:$('fftProbeSummary'),fftViewNote:document.querySelector('[data-help=fft]'),heightDetails:document.querySelector('[data-help=distribution]'),frequencyDetails:document.querySelector('[data-help=band]'),bandDetails:document.querySelector('[data-help=band]'),fftDetails:document.querySelector('[data-help=fft]')};
+  for(const [id,target] of Object.entries(explicit))connect(target,$(id));
+  for(const p of document.querySelectorAll('.hint,.chart-foot,.metric-note,.sidebar-foot,.fft-color-hint,.map-profile-controls>span,.view-controls>.muted,.export-card>p,.tab-panel>.analysis-note')){
+    if(p.id==='hoverValue'){p.textContent='';continue;}
+    if(!p.id)p.id=`tipSource${++sequence}`;
+    let target=explicit[p.id]??p.closest('.chart-card')?.querySelector('.card-heading [data-help]')??p.closest('.roi-controls')?.querySelector('[data-help]')??p.closest('.export-card')?.querySelector('h3')??p.closest('.settings-group')?.querySelector('summary')??p.closest('#researchPanel')?.querySelector('[data-help=fft]')??document.querySelector('.privacy');
+    if(target?.tagName==='H3')target.tabIndex=0;
+    connect(target,p);p.hidden=true;
+  }
+  const tooltip=$('tooltip');let owner=null,timer;
+  const hide=()=>{tooltip.hidden=true;if(owner)owner.removeAttribute('aria-describedby');owner=null;};
+  const find=el=>el?.closest?.('[data-tip],[data-tip-source]');
+  const show=target=>{
+    clearTimeout(timer);const sources=(target.dataset.tipSource??'').split(' ').filter(Boolean).map(id=>$(id)?.textContent.trim()).filter(Boolean),text=[target.dataset.tip,...sources].filter(Boolean).join('\n\n');if(!text)return;
+    if(owner&&owner!==target)owner.removeAttribute('aria-describedby');owner=target;(target.closest('dialog')??document.body).append(tooltip);tooltip.textContent=text;tooltip.hidden=false;target.setAttribute('aria-describedby','tooltip');
+    const b=target.getBoundingClientRect(),w=tooltip.offsetWidth,h=tooltip.offsetHeight;tooltip.style.left=`${Math.max(8,Math.min(innerWidth-w-8,b.left))}px`;tooltip.style.top=`${b.bottom+h+12<innerHeight?b.bottom+8:Math.max(8,b.top-h-8)}px`;
+  };
+  document.addEventListener('pointerover',e=>{if(tooltip.contains(e.target)){clearTimeout(timer);return;}const t=find(e.target);if(t)show(t);});
+  document.addEventListener('pointerout',e=>{if(find(e.target)||tooltip.contains(e.target))timer=setTimeout(hide,160);});
+  document.addEventListener('focusin',e=>{const t=find(e.target);if(t)show(t);});document.addEventListener('focusout',()=>{timer=setTimeout(hide,160);});
+  document.addEventListener('click',e=>{const t=find(e.target);if(t?.classList.contains('info-button')){show(t);}else if(!tooltip.contains(e.target)&&!t)hide();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')hide();});window.addEventListener('scroll',e=>{if(!tooltip.contains(e.target))hide();},true);window.addEventListener('resize',hide);
+}
+async function checkUpdates(){
+  const button=$('checkUpdate');if(button.disabled)return;
+  button.disabled=true;button.textContent='確認中…';$('updateNotice').hidden=true;
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const url=new URL('./',location.href);url.searchParams.set('_update',String(Date.now()));const response=await fetch(url,{cache:'no-store',signal:controller.signal});if(!response.ok)throw Error('更新情報を取得できません。');
+    const latest=versionFromHTML(await response.text()),changed=latest!==APP_VERSION;
+    $('updateStatus').textContent=changed?'新しいバージョンがあります':'最新版です';$('updateLink').hidden=!changed;
+    if(changed)$('updateLink').href=updateURL(location.href,latest);
+  }catch(e){$('updateStatus').textContent=e.name==='AbortError'?'確認がタイムアウトしました':e.message;$('updateLink').hidden=true;}
+  finally{clearTimeout(timer);button.disabled=false;button.textContent='↻ 更新確認';$('updateNotice').hidden=false;}
+}
 function mapPoints(r=active()){return r?(mapMeasurements.get(r.key)??[]).map(p=>surfacePoint(r,p.column*r.dx,p.row*r.dx)):[];}
 function drawMapMeasurement(){
   const r=active();if(!r)return;const points=mapPoints(r),m=points.length===2?surfaceMeasurement(...points):null;
   drawMeasurement($('surface2d'),points,{caption:m?`XY distance ${measureNumber(m.distance)} µm / B-A ${Number.isFinite(m.heightDifference)?measureNumber(m.heightDifference)+' nm':'missing height'}`:''});
   $('mapMeasureToggle').setAttribute('aria-pressed',String(mapMeasureMode));$('surface2d').classList.toggle('measuring',mapMeasureMode);
   $('mapMeasurementDetails').textContent=points.length?points.map((p,i)=>`${i?'B':'A'}: X ${measureNumber(p.x)} / Y ${measureNumber(p.y)} µm · 高さ ${measureNumber(p.z)}${Number.isFinite(p.z)?' nm':''}`).join('\n')+(m?`\n平面距離 ${measureNumber(m.distance)} µm · ΔX ${measureNumber(m.dx)} / ΔY ${measureNumber(m.dy)} µm\n高低差 B−A: ${measureNumber(m.heightDifference)}${Number.isFinite(m.heightDifference)?' nm':''}`:'\nBを選択してください。')+'\n最寄りの実画素・表示中の補正後の高さで計測。次のクリックで新しいAを指定します。':'「2点計測」でマップ上のA・Bを選ぶと、平面距離と高低差を表示します。';
+  $('mapReadout').hidden=!points.length;$('mapDistance').textContent=m?measureNumber(m.distance)+' µm':'Bを選択';$('mapHeight').textContent=m?measureNumber(m.heightDifference)+(Number.isFinite(m.heightDifference)?' nm':''):'—';
 }
-function pickMapPoint(point){const r=active(),p=surfacePoint(r,point.x,point.y),list=mapMeasurements.get(r.key)??[];mapMeasurements.set(r.key,list.length<2?[...list,{column:p.column,row:p.row}]:[{column:p.column,row:p.row}]);drawProfileLines($('surface2d'),profileLines(),appliedROI(r));drawMapMeasurement();}
+function pickMapPoint(point){const r=active(),p=surfacePoint(r,point.x,point.y),list=mapMeasurements.get(r.key)??[];mapMeasurements.set(r.key,list.length<2?[...list,{column:p.column,row:p.row}]:[{column:p.column,row:p.row}]);drawProfileLines($('surface2d'),profileLines());drawMapMeasurement();}
 function selectedMeasureProfile(){
   const all=profileSeries(),select=$('profileMeasureLine'),choices=all.map(p=>({id:p.draft?'current':`saved:${p.id}`,profile:p})),signature=choices.map(c=>`${c.id}/${c.profile.file}/${c.profile.name}`).join('|');
   if(select.dataset.signature!==signature){const old=select.value;select.replaceChildren();for(const c of choices){const o=document.createElement('option');o.value=c.id;o.textContent=`${c.profile.name} · ${c.profile.file}`;select.append(o);}select.value=choices.some(c=>c.id===old)?old:'current';select.dataset.signature=signature;}
@@ -37,12 +84,13 @@ function currentProfileMeasurement(){
   const points=state.distances.map(d=>profilePoint(p,d));return {p,state,points};
 }
 function renderProfileMeasurement(){
-  if(!active())return;const q=currentProfileMeasurement();if(!q)return;
+  if(!active())return;$('profileMeasureError').hidden=true;const q=currentProfileMeasurement();if(!q)return;
   const {p,points}=q,m=points.length===2?{distance:Math.abs(points[1].distance-points[0].distance),heightDifference:Number.isFinite(points[0].height)&&Number.isFinite(points[1].height)?points[1].height-points[0].height:NaN}:null;
   $('profileMeasureToggle').setAttribute('aria-pressed',String(profileMeasureMode));$('profile').classList.toggle('measuring',profileMeasureMode);
   drawMeasurement($('profile'),points,{profile:true,caption:m?`Distance ${measureNumber(m.distance)} µm / B-A ${Number.isFinite(m.heightDifference)?measureNumber(m.heightDifference)+' nm':'missing height'}`:''});
   $('profileMeasurementDetails').textContent=points.length?`${p.name} · ${p.file}\n`+points.map((v,i)=>`${i?'B':'A'}: 距離 ${measureNumber(v.distance)} µm · 高さ ${measureNumber(v.height)}${Number.isFinite(v.height)?' nm':''}`).join('\n')+(m?`\n横方向の距離 ${measureNumber(m.distance)} µm · 高低差 B−A ${measureNumber(m.heightDifference)}${Number.isFinite(m.heightDifference)?' nm':''}`:'\nBを選択してください。')+'\n選択した断面の最寄りのサンプル点を使用（断面は双線形補間）。欠損の高さは補完しません。':'断面を選び、「2点計測」で2つの横位置をクリックします。選択した曲線上のA・Bを計測します。';
-  for(const [i,id] of ['measureDistanceA','measureDistanceB'].entries())$(id).value=points[i]?.distance??'';
+  $('profileReadout').hidden=!points.length;$('profileDistance').textContent=m?measureNumber(m.distance)+' µm':'Bを選択';$('profileHeight').textContent=m?measureNumber(m.heightDifference)+(Number.isFinite(m.heightDifference)?' nm':''):'—';
+  for(const [i,id] of ['measureDistanceA','measureDistanceB'].entries())$(id).value=points[i]?measureNumber(points[i].distance):'';
 }
 function repaintProfileMeasurement(){paintProfiles();}
 function renderMeasurements(){drawMapMeasurement();renderProfileMeasurement();}
@@ -54,7 +102,6 @@ function roiDraft(r=active()){return r?(sources.get(r.key)?.roiDraft??r.options.
 function roiPlot(r=active()){const rect=roiDraft(r);return rect?{...rect,applied:Boolean(r?.planeFit&&['x0','x1','y0','y1'].every(k=>Math.abs(rect[k]-r.planeFit.rectangle_um[k])<1e-7))}:null;}
 function readROI(){return Object.fromEntries(Object.entries(roiFields).map(([k,id])=>[k,$(id).value===''?NaN:Number($(id).value)]));}
 function writeROI(rect){for(const [k,id] of Object.entries(roiFields))$(id).value=rect?rect[k]:'';}
-function appliedROI(r){return r?.planeFit?{...r.planeFit.rectangle_um,applied:true}:null;}
 function paintROIMap(){const r=active();if(!r||!$('roiDialog').open)return;heatmap($('roiMap'),r.surface,r.cols,r.rows,r.dx,{range:surfaceRange(r),colormap:$('colormap').value,cacheOverlay:true});drawProfileLines($('roiMap'),[],roiPlot(r));}
 function roiOverlay(){const r=active();if(r&&$('roiDialog').open)drawProfileLines($('roiMap'),[],roiPlot(r));}
 
@@ -63,24 +110,26 @@ function renderROI(r){
   $('roiMap').classList.toggle('roi-selecting',roiMode);
   $('roiSelect').setAttribute('aria-pressed',String(roiMode));$('roiSelect').textContent=roiMode?'ドラッグ選択を終了':'範囲をドラッグ選択';
   if(!r)return;
-  writeROI(roiDraft(r));$('roiFileName').textContent=r.name;$('roiSummary').textContent=r.planeFit?'内側範囲から傾斜補正を適用済み（青枠）。詳細は「傾斜補正」で確認できます。':'';paintROIMap();
+  $('roiStatus').textContent=r.planeFit?`補正済み · ${r.planeFit.valid_points.toLocaleString()}点`:roiDraft(r)?'範囲選択済み':'平坦な内側を囲んでください';
+  writeROI(roiDraft(r));$('roiFileName').textContent=r.name;$('roiSummary').textContent=r.planeFit?'領域補正済み':'';paintROIMap();
   const fit=r.planeFit,rect=roiDraft(r),different=fit&&rect&&['x0','x1','y0','y1'].some(k=>Math.abs(rect[k]-fit.rectangle_um[k])>1e-7);
   $('roiDetails').textContent=fit?`${different?'新しい範囲は未適用。現在の補正: ':'適用済み · '}有効 ${fit.valid_points} / ${fit.total_pixels} 点\nX ${fit.rectangle_um.x0.toFixed(2)}〜${fit.rectangle_um.x1.toFixed(2)} / Y ${fit.rectangle_um.y0.toFixed(2)}〜${fit.rectangle_um.y1.toFixed(2)} µm\n傾き X ${fit.slope_x_nm_per_um.toPrecision(6)} / Y ${fit.slope_y_nm_per_um.toPrecision(6)} nm/µm · 範囲内の残差RMS ${fit.residual_rms_nm.toPrecision(5)} nm\n元の全画素から平面のみを差し引きました。`:rect?'範囲選択済み（未適用）。「この範囲で傾斜補正」を押してください。':'「範囲をドラッグ選択」で、ダレを含まない平坦な内側を囲んでください。';
 }
 async function applyROI(reset=false){
   const r=active(),source=r&&sources.get(r.key);if(!r||!source||busy||exporting)return;
-  let rect,options;try{rect=reset?null:readROI();if(rect)regionPixelBounds(r,rect);options={...r.options,form:reset?'none':'roi-plane',plane:false,planeROI:rect,filter:'off',clip:false};}catch(e){notify(e.message,true);$('roiDetails').textContent=e.message;return;}
-  roiMode=false;busy=true;cancelled=false;buttons();renderROI(r);notify('元データから傾斜補正を計算中…');
+  let rect,options;try{rect=reset?null:readROI();if(rect)regionPixelBounds(r,rect);options={...r.options,form:reset?'none':'roi-plane',plane:false,planeROI:rect,filter:'off',clip:false};}catch(e){notify(e.message,true);$('roiDetails').textContent=e.message;$('roiStatus').textContent=e.message;return;}
+  roiMode=false;busy=true;cancelled=false;buttons();renderROI(r);notify('傾斜補正中…');
   try{
     const next=await calculate(source,options);if(cancelled)return;next.key=r.key;
     const index=results.findIndex(v=>v.key===r.key);if(index<0)return;
     results[index]=next;source.planeROI=rect;if(rect)source.roiDraft={...rect};
     $('form').value=options.form;$('filter').value='off';$('clip').checked=false;modeUI();renderFiles();renderActive();
-    notify(reset?'元の高さデータに戻しました（形状補正・FFTフィルター・クリップなし）。':'指定した内側の有効点だけで平面を求め、全体から差し引きました。');
-  }catch(e){notify(`傾斜補正を適用できませんでした。現在の結果は保持しています。\n${e.message}`,true);$('roiDetails').textContent=`適用できませんでした。現在の結果は保持しています。${e.message}`;}
+    notify(reset?'補正を解除しました。':'傾斜補正を適用しました。');
+  }catch(e){notify(`傾斜補正を適用できませんでした。現在の結果は保持しています。\n${e.message}`,true);$('roiDetails').textContent=`適用できませんでした。現在の結果は保持しています。${e.message}`;$('roiStatus').textContent=e.message;}
   finally{busy=false;buttons();}
 }
-function notify(message, error = false) {$('notification').textContent = message; $('notification').classList.toggle('error', error); $('notification').hidden = !message;}
+let notificationTimer;
+function notify(message, error = false) {clearTimeout(notificationTimer);if(message&&!error&&!message.includes('未適用'))notificationTimer=setTimeout(()=>{$('notification').hidden=true;},6000);$('notification').textContent = message; $('notification').classList.toggle('error', error); $('notification').hidden = !message;}
 function getOptions() {
   const limit = Number($('limit').value); if (!Number.isFinite(limit) || limit <= 0 || limit > 1e6) throw new Error('クリップ上限は 0 より大きく、1,000,000 nm 以下で指定してください。');
   const wavelength = $('cutoffUnit').value === 'wavelength', low = Number($('cutoffLow').value), high = Number($('cutoffHigh').value);
@@ -100,7 +149,7 @@ function applySurfaceBounds(){
     appliedSurfaceBounds=next;surfaceColorFrame.push(true);notify('');
   }catch(e){notify(`${e.message} 直前の有効な色範囲を保持しています。`,true);}
 }
-function paintSurface(r,canvases,lines){const range=surfaceRange(r);heatmap(canvases.surface2d,r.surface,r.cols,r.rows,r.dx,{range,colormap:$('colormap').value,lines});surface3d(canvases.surface3d,r,{azimuth,elevation,range,colormap:$('colormap').value});if(canvases.surface2d===$('surface2d'))drawProfileLines(canvases.surface2d,lines,appliedROI(r));if(canvases.surface2d===$('surface2d'))drawMapMeasurement();if(canvases.surface2d===$('surface2d'))$('surfaceColorHint').textContent=`${range.mode==='auto'?'Auto（全域のmin〜max）':'指定範囲'}: ${range.min.toPrecision(5)}〜${range.max.toPrecision(5)} nm · 2D / 3D共通。空欄はそれぞれAuto。min/maxを個別に指定。${range.error?` 指定範囲がこのデータに合わないためAuto表示: ${range.error}`:''}`;}
+function paintSurface(r,canvases,lines){const range=surfaceRange(r);heatmap(canvases.surface2d,r.surface,r.cols,r.rows,r.dx,{range,colormap:$('colormap').value,lines});surface3d(canvases.surface3d,r,{azimuth,elevation,range,colormap:$('colormap').value});if(canvases.surface2d===$('surface2d'))drawProfileLines(canvases.surface2d,lines);if(canvases.surface2d===$('surface2d'))drawMapMeasurement();if(canvases.surface2d===$('surface2d'))$('surfaceColorHint').textContent=`${range.mode==='auto'?'Auto（全域のmin〜max）':'指定範囲'}: ${range.min.toPrecision(5)}〜${range.max.toPrecision(5)} nm · 2D / 3D共通。空欄はそれぞれAuto。min/maxを個別に指定。${range.error?` 指定範囲がこのデータに合わないためAuto表示: ${range.error}`:''}`;}
 function modeUI() {
   const roi=$('form').value==='roi-plane';if(roi){$('filter').value='off';$('clip').checked=false;}$('filter').disabled=roi;$('clip').disabled=roi;
   $('filterOptions').hidden = $('filter').value === 'off'; $('cutoffLow').disabled = $('filter').value === 'lowpass'; $('cutoffHigh').disabled = $('filter').value === 'highpass';
@@ -116,7 +165,7 @@ function buttons() {
   document.querySelectorAll('[data-png], #profileExcel, #psdExcel, #compareExcel, #researchExcel, #frequencyApply, #bandExcel, #fftCSV, #addProfile').forEach(b => b.disabled = busy || exporting || !results.length);
 }
 function startWorker() {
-  worker = new Worker(new URL('./worker.js?v=metrology-ui-2', import.meta.url), {type: 'module'});
+  worker = new Worker(new URL('./worker.js?v=clean-ui-1', import.meta.url), {type: 'module'});
   worker.onmessage = ({data}) => {if (pending && pending.id === data.id) {const p = pending; pending = null; data.error ? p.reject(new Error(data.error)) : p.resolve(data.result);}};
   worker.onerror = event => {if (pending) {pending.reject(new Error(event.message || '解析 Worker の起動に失敗しました。')); pending = null;} worker.terminate(); worker = null;};
 }
@@ -175,9 +224,9 @@ function renderActive() {
   for (const [id, value] of Object.entries({sq: r.stats.sq, sa: r.stats.sa, pv: r.stats.pv, valid: r.stats.validPercent})) $(id).textContent = value.toFixed(id === 'valid' ? 1 : 3);
   if($('row').dataset.key!==r.key){$('row').dataset.key=r.key;resetDraft(r);}
   configureProfile(r); paint(r,Object.fromEntries(canvasIds.map(id=>[id,$(id)])),Number($('row').value));
-  renderProfileList(); renderResearchDetails(r); renderROI(r);renderMeasurements();
+  renderProfileList(); renderResearchDetails(r); renderROI(r);renderMeasurements();renderCompactStatus(r);
   document.querySelectorAll('.slope-note').forEach(el => el.textContent = r.options.mode === 'legacy' ? '元コード互換 · nm/pixel · |微分| > 10 を 0 に置換' : 'サンプリング間隔で換算 · nm/µm · 中央差分');
-  const p = r.psd, sc=r.psdConditions;
+  const p = r.psd, sc=r.psdConditions;$('psdWarning').hidden=p.used!==0;$('psdWarning').textContent='有効なPSDラインがありません。欠損点の扱い・方向を確認してください。';
   $('psdDetails').textContent = `${r.options.mode === 'legacy' ? '元コード互換' : '標準片側 PSD'} / ${p.direction.toUpperCase()} 方向　｜　使用 ${p.used} / ${p.lines} ライン　｜　Δf = ${p.df.toPrecision(5)} 1/µm　｜　Nyquist = ${p.nyquist.toPrecision(5)} 1/µm\n${r.options.mode === 'legacy' ? `ゼロ埋め ${p.zeroFilled} ライン。DC と Nyquist を除外。` : `欠損で除外 ${p.skipped} / 補間 ${p.interpolated} ライン。ライン平均を除去。窓: ${r.options.window}。`}${sc.clip ? ` 高さを ±${r.options.limit} nm にクリップ（${sc.clipped} 点）。` : ' 高さのクリップなし。'}
 PSD入力: ${spectralLabel(r)}。 PSD は nm²·µm。${p.used === 0 ? '\n有効な PSD ラインがありません。欠損の補間または方向の変更を検討してください。' : ''}`;
   renderComparison(); buttons();
@@ -189,6 +238,7 @@ function renderComparison() {
 function selectTab(tab) {
   activeTab = tab; document.querySelectorAll('[data-tab]').forEach(b => {const on = b.dataset.tab === tab; b.classList.toggle('active', on); b.setAttribute('aria-selected', on);});
   for (const t of ['surface', 'psd', 'research', 'compare', 'export']) $(t + 'Panel').hidden = t !== tab;
+  if(active())renderActive();
 }
 async function saveJob(action) {if (exporting || busy) return; exporting = true; buttons(); notify('保存ファイルを生成中…'); try {await action(); notify('保存ファイルを生成しました。');} catch (e) {notify(`保存に失敗しました: ${e.message}`, true);} finally {exporting = false; buttons();}}
 async function saveZip(items) {
@@ -205,7 +255,7 @@ async function saveZip(items) {
     const labels = ['2D Surface', '3D Surface', 'Line Profiles', 'Intensity', 'X Slope', 'Y Slope'];
     canvasIds.slice(0, 6).forEach((id, k) => {const x = (k % 2) * 900, y = 60 + Math.floor(k / 2) * 560; c.font = '18px sans-serif'; c.fillText(labels[k], x + 30, y + 18); c.drawImage(canvases[id], x, y + 20, 900, 540);});
     entries.push({name:`${prefix}/profiles.xlsx`,data:profileWorkbook(saved,[r],r.key===active()?.key?profileAxes():{})},{name:`${prefix}/research.xlsx`,data:researchWorkbook(r,bandSummary(r),{wavelength:$('psdAxis').value==='wavelength'})},{name:`${prefix}/2d_psd.csv`,data:spectrumCSV(r,'power')},{name:`${prefix}/2d_amplitude.csv`,data:spectrumCSV(r,'amplitude')});
-    entries.push({name: `${prefix}/allfigs.png`, data: await pngBytes(overview)}, {name: `${prefix}/psd.xlsx`, data: psdWorkbook(r,{wavelength:$('psdAxis').value==='wavelength'})}, {name: `${prefix}/mean_psd.csv`, data: csv(meanRows(r))}, {name: `${prefix}/surface_height_nm.csv`, data: surfaceCSV(r)}, {name: `${prefix}/parameters.json`, data: JSON.stringify({...metadata(r), frequency_bands:frequencySummary(r), export_psd_axis:$('psdAxis').value, export_surface_color_bounds: {...appliedSurfaceBounds},export_measurements:measurementMetadata(r),export_surface_color_range:surfaceRange(r), export_profiles:saved.map(p=>({name:p.name,x0:p.x0,y0:p.y0,x1:p.x1,y1:p.y1})),export_colormap:$('colormap').value,export_profile_axes:r.key===active()?.key?profileAxes():{},export_fft_kind:$('fftKind').value,export_fft_log:$('fftLog').checked,export_fft_dc:$('fftDC').checked,export_fft_view:fftExportSettings(r)}, null, 2)});
+    entries.push({name: `${prefix}/allfigs.png`, data: await pngBytes(overview)}, {name: `${prefix}/psd.xlsx`, data: psdWorkbook(r,{wavelength:$('psdAxis').value==='wavelength'})}, {name: `${prefix}/mean_psd.csv`, data: csv(meanRows(r))}, {name: `${prefix}/surface_height_nm.csv`, data: surfaceCSV(r)}, {name: `${prefix}/parameters.json`, data: JSON.stringify({...metadata(r), frequency_bands:frequencySummary(r), export_psd_axis:$('psdAxis').value, app_version:APP_VERSION,export_surface_color_bounds: {...appliedSurfaceBounds},export_measurements:measurementMetadata(r),export_surface_color_range:surfaceRange(r), export_profiles:saved.map(p=>({name:p.name,x0:p.x0,y0:p.y0,x1:p.x1,y1:p.y1})),export_colormap:$('colormap').value,export_profile_axes:r.key===active()?.key?profileAxes():{},export_fft_kind:$('fftKind').value,export_fft_log:$('fftLog').checked,export_fft_dc:$('fftDC').checked,export_fft_view:fftExportSettings(r)}, null, 2)});
     await new Promise(resolve => setTimeout(resolve, 0));
   }
   download(items.length === 1 ? `${safeName(items[0].name)}_results.zip` : 'zygo_batch_results.zip', zip(entries), 'application/zip');
@@ -239,7 +289,8 @@ function renderFFT(r,canvas=$('fftPlot'),probe=true){
   }
 }
 function updateFFTReadout(){
-  if(!fftSample){$('fftCursor').textContent='画像上で波長・方向を読む。クリック／タップで固定。数値座標でも指定できます。';return;}
+  if(!fftSample){$('fftProbeSummary').textContent='画像上で位置を選択';$('fftCursor').textContent='画像上で波長・方向を読む。クリック／タップで固定。数値座標でも指定できます。';return;}
+  $('fftProbeSummary').textContent=fftSample.dc?'DC':`λ ${measureNumber(fftSample.wavelength)} µm · ${fftSample.angle.toFixed(1)}°`;
   const p=fftSample,q=fftRendered.q,unit=q.kind==='power'?'nm²·µm²':'nm',number=v=>Number.isFinite(v)?v.toPrecision(5):'—';
   $('fftCursor').textContent=`${fftPinned?'固定':'カーソル'} · 最寄りのFFTビン: fx ${number(p.fx)} / fy ${number(p.fy)} 1/µm\n${p.dc?'DC（0周波数） · 波長 ∞ · 方向は定義しません':`波長 ${number(p.wavelength)} µm · 繰り返す方向 ${p.angle.toFixed(2)}° · 筋の向き ${p.stripeAngle.toFixed(2)}°`}\n${q.kind==='power'?'2D PSD':'FFT振幅'} ${number(p.value)} ${unit}（対数変換前）${p.dc&&!q.dc?' · DCは画像では非表示':''}`;
 }
@@ -254,7 +305,7 @@ function paintResearch(r,canvases){
 function frequencySummary(r){const low=Number($('frequencyLow').value),high=Number($('frequencyHigh').value);return {x:frequencyBands(r.research.x,low,high),y:frequencyBands(r.research.y,low,high)};}
 function bandSummary(r){const min=Number($('bandMin').value),max=Number($('bandMax').value);return {minWavelength:min,maxWavelength:max,x:bandRMS(r.research.x,min,max),y:bandRMS(r.research.y,min,max),frequency:frequencySummary(r)};}
 function renderFrequencyBands(r){
-  const table=$('frequencyTable'),number=v=>Number.isFinite(v)?v.toPrecision(6):'—';table.replaceChildren();
+  $('frequencyError').hidden=true;const table=$('frequencyTable'),number=v=>Number.isFinite(v)?v.toPrecision(6):'—';table.replaceChildren();
   try{
     const b=frequencySummary(r),lo=b.x.lowBoundary,hi=b.x.highBoundary;
     $('frequencyDetails').textContent=`低: 0 < f < ${lo} / 中: ${lo} ≤ f < ${hi} / 高: f ≥ ${hi} [1/µm]。境界の波長 ${1/lo} / ${1/hi} µm。各方向の測定PSDビン内のみ。X: ${number(b.x.minFrequency)}〜${number(b.x.maxFrequency)} / Y: ${number(b.y.minFrequency)}〜${number(b.y.maxFrequency)} [1/µm]。窓: ${r.research.window}。入力: ${spectralLabel(r)}。`;
@@ -263,7 +314,7 @@ function renderFrequencyBands(r){
       const pair=['x','y'].map(d=>i<3?b[d].bands[i]:{integral:b[d].totalIntegral,rms:b[d].totalRMS,bins:b[d].bands.reduce((n,v)=>n+v.bins,0)}),tr=document.createElement('tr');
       for(const value of [names[i],...pair.flatMap(v=>[number(v.integral),number(v.rms),v.bins])]){const td=document.createElement('td');td.textContent=value;tr.append(td);}table.append(tr);
     }
-  }catch(e){$('frequencyDetails').textContent=e.message;}
+  }catch(e){$('frequencyDetails').textContent=e.message;$('frequencyError').textContent=e.message;$('frequencyError').hidden=false;}
 }
 
 const metric=n=>Number.isFinite(n)?n.toFixed(3):'—';
@@ -285,7 +336,7 @@ $('demo').onclick = () => processQueue([{name: 'DEMO · 合成表面', synthetic
 $('testData').onclick = async () => {try {const response = await fetch('/__test-data'); if (!response.ok) throw new Error('ローカルのテスト DAT を取得できません。'); await processQueue([{name: 'E17-C1-1-1.dat', buffer: await response.arrayBuffer()}]);} catch (e) {notify(e.message, true);}};
 if (['localhost', '127.0.0.1'].includes(location.hostname)) fetch('/__test-data', {method: 'HEAD'}).then(r => {if (r.ok) $('testData').hidden = false;}).catch(() => {});
 $('settings').onsubmit = e => {e.preventDefault(); const queue = results.map(r => sources.get(r.key)); processQueue(queue, true);};
-$('settings').onchange = () => {modeUI(); if (results.length && !busy) notify('解析設定が変更されています。「設定を適用して再解析」で結果に反映してください。');};
+$('settings').onchange = () => {modeUI(); if (results.length && !busy) notify('未適用の設定があります。');};
 $('mode').addEventListener('change', () => {$('clip').checked = $('mode').value === 'legacy';modeUI();});
 $('cancel').onclick = () => {cancelled = true; worker?.terminate(); worker = null; pending?.reject(new Error('中止')); pending = null;};
 $('remove').onclick = () => {const r = active(); sources.delete(r.key);mapMeasurements.delete(r.key); profiles=profiles.filter(p=>p.key!==r.key); results.splice(selected, 1); selected = Math.min(selected, Math.max(0, results.length - 1)); renderFiles(); renderActive();};
@@ -296,7 +347,7 @@ $('surfaceColorApply').onclick=applySurfaceBounds;
 $('surfaceColorAuto').onclick=()=>{$('surfaceMin').value='';$('surfaceMax').value='';appliedSurfaceBounds={min:null,max:null};surfaceColorFrame.push(true);notify('');};
 function profileLines(){const r=active();return r?[...profiles.filter(p=>p.key===r.key&&p.visible),draftLine(r)]:[];}
 function paintProfiles(){
-  const r=active();if(!r)return;drawProfileLines($('surface2d'),profileLines(),appliedROI(r));drawMapMeasurement();configureProfile(r);
+  const r=active();if(!r)return;drawProfileLines($('surface2d'),profileLines());drawMapMeasurement();configureProfile(r);
   if(Math.hypot(Number($('x1').value)-Number($('x0').value),Number($('y1').value)-Number($('y0').value))<1e-8)return;
   try{seriesChart($('profile'),profileSeries().map(p=>({x:p.distance,y:p.height,color:p.color,name:p.name})),{limits:profileAxes()});renderProfileMeasurement();}catch(e){notify(e.message,true);}
 }
@@ -317,16 +368,16 @@ const gestureFrame=frameQueue(updateGesture);
 function updateROIGesture(point){
   const r=active();if(!roiGesture||r?.key!==roiGesture.key)return;
   const rect=rectangleFromPoints(roiGesture.start,point,(r.cols-1)*r.dx,(r.rows-1)*r.dx);
-  sources.get(r.key).roiDraft=rect;writeROI(rect);roiOverlay();
+  sources.get(r.key).roiDraft=rect;writeROI(rect);roiOverlay();$('roiStatus').textContent='範囲を選択中';
   $('roiDetails').textContent=`範囲を選択中 · X ${rect.x0.toFixed(2)}〜${rect.x1.toFixed(2)} / Y ${rect.y0.toFixed(2)}〜${rect.y1.toFixed(2)} µm。離して範囲を確定します。`;
 }
 const roiFrame=frameQueue(updateROIGesture);
 function endROIGesture(e,cancel=false){
   if(!roiGesture||roiGesture.pointerId!==e.pointerId)return;
-  const g=roiGesture;
-  if(cancel){roiFrame.cancel();const source=sources.get(g.key);if(source)source.roiDraft=g.previous;}else{const p=mapPoint(e,true,$('roiMap'));if(p)roiFrame.push(p);roiFrame.flush();try{regionPixelBounds(active(),roiDraft());}catch(error){sources.get(g.key).roiDraft=g.previous;notify(error.message,true);}}
+  const g=roiGesture;let selectionError;
+  if(cancel){roiFrame.cancel();const source=sources.get(g.key);if(source)source.roiDraft=g.previous;}else{const p=mapPoint(e,true,$('roiMap'));if(p)roiFrame.push(p);roiFrame.flush();try{regionPixelBounds(active(),roiDraft());}catch(error){sources.get(g.key).roiDraft=g.previous;selectionError=error.message;}}
   roiGesture=null;roiMode=false;const c=$('roiMap');if(c.hasPointerCapture(e.pointerId))c.releasePointerCapture(e.pointerId);
-  renderROI(active());roiOverlay();
+  renderROI(active());roiOverlay();if(selectionError)$('roiStatus').textContent=selectionError;
 }
 $('roiSelect').onclick=()=>{if(!active()||busy||exporting)return;roiMode=!roiMode;renderROI(active());};
 $('roiApply').onclick=()=>applyROI();$('roiReset').onclick=()=>applyROI(true);
@@ -341,20 +392,20 @@ $('roiMap').onpointerup=e=>endROIGesture(e);
 $('roiMap').onpointercancel=e=>endROIGesture(e,true);
 $('roiMap').onlostpointercapture=e=>{if(roiGesture)endROIGesture(e,true);};
 $('mapMeasureToggle').onclick=()=>{mapMeasureMode=!mapMeasureMode;drawMapMeasurement();};
-$('mapMeasureClear').onclick=()=>{if(active())mapMeasurements.delete(active().key);drawProfileLines($('surface2d'),profileLines(),appliedROI(active()));drawMapMeasurement();};
+$('mapMeasureClear').onclick=()=>{if(active())mapMeasurements.delete(active().key);drawProfileLines($('surface2d'),profileLines());drawMapMeasurement();};
 $('profileMeasureToggle').onclick=()=>{profileMeasureMode=!profileMeasureMode;renderProfileMeasurement();};
 $('profileMeasureClear').onclick=()=>{const q=currentProfileMeasurement();if(q)q.state.distances=[];repaintProfileMeasurement();};
 $('profileMeasureLine').onchange=()=>repaintProfileMeasurement();
-$('profileMeasureApply').onclick=()=>{try{const q=currentProfileMeasurement();if(!q)return;const values=['measureDistanceA','measureDistanceB'].map(id=>$(id).value===''?NaN:Number($(id).value));q.state.distances=values.map(v=>profilePoint(q.p,v).distance);repaintProfileMeasurement();}catch(e){$('profileMeasurementDetails').textContent=e.message;}};
+$('profileMeasureApply').onclick=()=>{try{const q=currentProfileMeasurement();if(!q)return;const values=['measureDistanceA','measureDistanceB'].map(id=>$(id).value===''?NaN:Number($(id).value));q.state.distances=values.map(v=>profilePoint(q.p,v).distance);repaintProfileMeasurement();}catch(e){$('profileMeasurementDetails').textContent=e.message;$('profileMeasureError').textContent=e.message;$('profileMeasureError').hidden=false;}};
 $('profile').onpointerdown=e=>{
   if(!profileMeasureMode||busy||e.button!==0)return;
   const c=$('profile'),a=c._seriesArea,b=c.getBoundingClientRect();if(!a||a.log)return;
   const x=(e.clientX-b.left)*c.width/b.width,y=(e.clientY-b.top)*c.height/b.height;if(x<a.left||x>a.left+a.w||y<a.top||y>a.top+a.h)return;
-  try{const q=currentProfileMeasurement();if(!q)return;const p=profilePoint(q.p,a.xmin+(x-a.left)/a.w*(a.xmax-a.xmin));q.state.distances=q.state.distances.length<2?[...q.state.distances,p.distance]:[p.distance];repaintProfileMeasurement();}catch(error){$('profileMeasurementDetails').textContent=error.message;}
+  try{const q=currentProfileMeasurement();if(!q)return;const p=profilePoint(q.p,a.xmin+(x-a.left)/a.w*(a.xmax-a.xmin));q.state.distances=q.state.distances.length<2?[...q.state.distances,p.distance]:[p.distance];repaintProfileMeasurement();}catch(error){$('profileMeasurementDetails').textContent=error.message;$('profileMeasureError').textContent=error.message;$('profileMeasureError').hidden=false;}
 };
 for(const id of Object.values(roiFields))$(id).onchange=()=>{
   const r=active();if(!r||busy)return;
-  try{const rect=readROI();regionPixelBounds(r,rect);sources.get(r.key).roiDraft=rect;renderROI(r);renderMeasurements();}catch(e){$('roiDetails').textContent=e.message;}
+  try{const rect=readROI();regionPixelBounds(r,rect);sources.get(r.key).roiDraft=rect;renderROI(r);renderMeasurements();renderCompactStatus(r);}catch(e){$('roiDetails').textContent=e.message;$('roiStatus').textContent=e.message;}
 };
 window.addEventListener('keydown',e=>{if($('analysisHelp').open||$('help').open)return;if(e.key==='Escape'&&roiGesture)endROIGesture({pointerId:roiGesture.pointerId},true);else if(e.key==='Escape'&&roiMode){roiMode=false;renderROI(active());}});
 $('surface2d').onpointerdown=e=>{
@@ -399,7 +450,7 @@ document.querySelectorAll('[data-png]').forEach(b => b.onclick = () => saveJob(a
 $('excel').onclick = () => saveJob(() => download(`${safeName(active().name)}_psd.xlsx`, psdWorkbook(active(),{wavelength:$('psdAxis').value==='wavelength'}), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('meanCSV').onclick = () => saveJob(() => download(`${safeName(active().name)}_mean_psd.csv`, csv(meanRows(active())), 'text/csv;charset=utf-8'));
 $('surfaceCSV').onclick = () => saveJob(() => download(`${safeName(active().name)}_surface.csv`, surfaceCSV(active()), 'text/csv;charset=utf-8'));
-$('parameters').onclick = () => saveJob(() => download(`${safeName(active().name)}_parameters.json`, JSON.stringify({...metadata(active()),frequency_bands:frequencySummary(active()),export_measurements:measurementMetadata(active()),export_surface_color_bounds:{...appliedSurfaceBounds},export_surface_color_range:surfaceRange(active()),export_fft_view:fftExportSettings(active())}, null, 2), 'application/json'));
+$('parameters').onclick = () => saveJob(() => download(`${safeName(active().name)}_parameters.json`, JSON.stringify({...metadata(active()),frequency_bands:frequencySummary(active()),export_measurements:measurementMetadata(active()),app_version:APP_VERSION,export_surface_color_bounds:{...appliedSurfaceBounds},export_surface_color_range:surfaceRange(active()),export_fft_view:fftExportSettings(active())}, null, 2), 'application/json'));
 $('summary').onclick = () => saveJob(() => download('PSD_summary.xlsx', summaryWorkbook(results, failures, results.map(r=>bandSummary(r))), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
 $('singleZip').onclick = () => saveJob(() => saveZip([active()])); $('downloadAll').onclick = () => saveJob(() => saveZip([...results]));
 $('helpButton').onclick = () => $('help').showModal(); $('closeHelp').onclick = () => $('help').close();
@@ -410,8 +461,8 @@ for(const k of ['profileXmin','profileXmax','profileYmin','profileYmax'])$(k).on
 $('resetProfileAxes').onclick=()=>{for(const k of ['profileXmin','profileXmax','profileYmin','profileYmax'])$(k).value='';renderActive();};
 $('addProfile').onclick=()=>{try{if(profiles.length>=31)throw new Error('比較する断面は現在の断面を含め32本までです。');const p=draftLine();extractProfile(active(),p);profiles.push({...p,id:++profileSerial,name:$('profileName').value.trim()||`断面 ${profileSerial}`,color:palette[(profileSerial-1)%palette.length],draft:false,visible:true});$('profileName').value='';renderActive();}catch(e){notify(e.message,true);}};
 for(const k of ['colormap','fftKind','fftLog','fftDC'])$(k).onchange=()=>{if(k==='fftKind'||k==='fftLog'){$('fftColorMin').value='';$('fftColorMax').value='';}if(active())renderActive();};
-for(const k of ['bandMin','bandMax','frequencyLow','frequencyHigh'])$(k).onchange=()=>{if(active()){renderResearchDetails(active());renderComparison();}};
-$('frequencyApply').onclick=()=>{if(active()){renderResearchDetails(active());renderComparison();}};
+for(const k of ['bandMin','bandMax','frequencyLow','frequencyHigh'])$(k).onchange=()=>{if(active()){renderResearchDetails(active());renderCompactStatus(active());renderComparison();}};
+$('frequencyApply').onclick=()=>{if(active()){renderResearchDetails(active());renderCompactStatus(active());renderComparison();}};
 $('researchWindow').onchange=()=>notify('特徴解析の窓を変更しました。「設定を適用して再解析」で反映してください。');
 $('cutoffUnit').onchange=()=>{for(const k of ['cutoffLow','cutoffHigh']){const n=Number($(k).value);if(n>0)$(k).value=1/n;}};
 const excelType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -434,4 +485,7 @@ $('fftPlot').onpointerleave=()=>{if(!fftPinned){fftProbeFrame.cancel();fftSample
 $('fftPlot').onpointerdown=e=>{const point=fftPoint(e);if(point){fftProbeFrame.cancel();showFFTProbe(point,true);}};
 $('fftProbe').onclick=()=>{try{if(!active())return;const fx=Number($('fftProbeX').value),fy=Number($('fftProbeY').value),s=active().research.spectrum;if($('fftProbeX').value===''||$('fftProbeY').value===''||!Number.isFinite(fx)||!Number.isFinite(fy)||fx<s.fx[0]||fx>s.fx.at(-1)||fy<s.fy[0]||fy>s.fy.at(-1))throw Error('調べる座標はFFTの周波数ビン範囲内で指定してください。');fftProbeFrame.cancel();showFFTProbe({fx,fy},true);}catch(e){notify(e.message,true);}};
 $('fftUnpin').onclick=()=>{fftProbeFrame.cancel();fftPinned=false;fftSample=null;drawFFTProbe($('fftPlot'));updateFFTReadout();};
-installHelp(); modeUI(); selectTab(activeTab); buttons();
+$('checkUpdate').onclick=checkUpdates;$('closeUpdateNotice').onclick=()=>{$('updateNotice').hidden=true;};
+const resizeCharts=frameQueue(()=>{if(active())renderActive();});window.addEventListener('resize',()=>resizeCharts.push(true));
+document.querySelector('.auxiliary-panels').addEventListener('toggle',e=>{if(e.target.open&&active())renderActive();});
+installHelp();installTips(); modeUI(); selectTab(activeTab); buttons();

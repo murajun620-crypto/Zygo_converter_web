@@ -4,9 +4,10 @@ const ink = '#526174', grid = '#e7edf2', teal = '#137c80';
 export const palette = ['#137c80', '#b36f31', '#725ab5', '#d35173', '#3d74aa', '#7b8f39'];
 export function setup(canvas, width = 900, height = 540) {
   canvas.width = width; canvas.height = height;
-  const c = canvas.getContext('2d'); c.fillStyle = '#ffffff'; c.fillRect(0, 0, width, height); c.font = '13px sans-serif'; c.lineWidth = 1; return c;
+  const c = canvas.getContext('2d'); c.fillStyle = '#ffffff'; c.fillRect(0, 0, width, height); c.font = `${Math.min(30,Math.max(14,14*width/(canvas.clientWidth||width)))}px sans-serif`; c.lineWidth = 1; return c;
 }
 function text(c, label, x, y, align = 'left', color = ink) {c.fillStyle = color; c.textAlign = align; c.fillText(label, x, y);}
+function colorLabel(c,label,x,y,maxWidth=116){c.save();let size=parseFloat(c.font);while(c.measureText(label).width>maxWidth&&size>16)c.font=`${--size}px sans-serif`;text(c,label,x,y,'right');c.restore();}
 function line(c, x1, y1, x2, y2, color = grid) {c.strokeStyle = color; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();}
 const fmt = n => Math.abs(n) >= 1e4 || (Math.abs(n) < 0.01 && n !== 0) ? n.toExponential(1) : Number(n.toFixed(2)).toString();
 const maps = {viridis:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],cividis:[[0,32,77],[65,78,108],[125,124,120],[188,173,108],[255,233,69]],turbo:[[48,18,59],[50,110,220],[24,220,165],[164,252,60],[249,155,30],[180,4,38]],coolwarm:[[59,76,192],[141,176,254],[221,221,221],[244,154,123],[180,4,38]]};
@@ -47,17 +48,18 @@ export function heatmap(canvas, values, cols, rows, dx, {limit, range=null, gray
   const cc = off.getContext('2d'), pixels = cc.createImageData(cols, rows);
   for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {const j = (y * cols + x) * 4, rgb = color(values[(rows - 1 - y) * cols + x], lo, hi, gray, colormap); pixels.data.set([...rgb, 255], j);}
   cc.putImageData(pixels, 0, 0);
-  const maxW = 685, maxH = 390, spanX=frequencies?frequencies.fx.at(-1)-frequencies.fx[0]+frequencies.dfX:cols,spanY=frequencies?frequencies.fy.at(-1)-frequencies.fy[0]+frequencies.dfY:rows, scale = Math.min(maxW / spanX, maxH / spanY), w = spanX * scale, h = spanY * scale, left = 75 + (maxW - w) / 2, top = 35 + (maxH - h) / 2;
+  const maxW = 630, maxH = 390, spanX=frequencies?frequencies.fx.at(-1)-frequencies.fx[0]+frequencies.dfX:cols,spanY=frequencies?frequencies.fy.at(-1)-frequencies.fy[0]+frequencies.dfY:rows, scale = Math.min(maxW / spanX, maxH / spanY), w = spanX * scale, h = spanY * scale, left = 75 + (maxW - w) / 2, top = 35 + (maxH - h) / 2;
   c.imageSmoothingEnabled = false; c.drawImage(off, left, top, w, h);
   c.strokeStyle = '#c7d2db'; c.strokeRect(left, top, w, h);
   if (axes) {
-    for (let k = 0; k <= 4; k++) {const t = k / 4,ix=Math.round(t*(cols-1)),iy=Math.round(t*(rows-1)); text(c, fmt(frequencies ? frequencies.fx[ix] : t * (cols - 1) * dx), left + w * (frequencies?(ix+0.5)/cols:t), top + h + 23, 'center'); text(c, fmt(frequencies ? frequencies.fy[iy] : t * (rows - 1) * dx), left - 12, top + h * (1-(frequencies?(iy+0.5)/rows:t)) + 4, 'right');}
-    text(c, frequencies ? 'fx [cycles/µm]' : 'x [µm]', left + w / 2, top + h + 50, 'center'); c.save(); c.translate(left - 58, top + h / 2); c.rotate(-Math.PI / 2); text(c, frequencies ? 'fy [cycles/µm]' : 'y [µm]', 0, 0, 'center'); c.restore();
+    const ticks=canvas.clientWidth&&canvas.clientWidth<600?2:4;
+    for (let k = 0; k <= ticks; k++) {const t = k / ticks,ix=Math.round(t*(cols-1)),iy=Math.round(t*(rows-1)); text(c, fmt(frequencies ? frequencies.fx[ix] : t * (cols - 1) * dx), left + w * (frequencies?(ix+0.5)/cols:t), top + h + 23, 'center'); text(c, fmt(frequencies ? frequencies.fy[iy] : t * (rows - 1) * dx), left - 12, top + h * (1-(frequencies?(iy+0.5)/rows:t)) + 4, 'right');}
+    text(c, frequencies ? 'fx [cycles/µm]' : 'x [µm]', left + w / 2, top + h + 65, 'center'); c.save(); c.translate(23, top + h / 2); c.rotate(-Math.PI / 2); text(c, frequencies ? 'fy [cycles/µm]' : 'y [µm]', 0, 0, 'center'); c.restore();
   }
-  const barX = 804, barW = 16;
+  const barX = 744, barW = 16;
   for (let k = 0; k < h; k++) {c.fillStyle = `rgb(${color(hi - (hi - lo) * k / h, lo, hi, gray, colormap)})`; c.fillRect(barX, top + k, barW, 1);}
-  text(c, unit, barX + 8, top - 12, 'center'); for (let k = 0; k <= 4; k++) text(c, fmt(hi - (hi - lo) * k / 4), barX + 22, top + k * h / 4 + 4);
-  if(range)text(c,`Color: ${range.mode==='auto'?'Auto':'Manual'} · ${fmt(lo)} to ${fmt(hi)} ${unit}`,450,520,'center');
+  text(c, unit, 890, top - 18, 'right'); for (let k = 0; k <= 4; k++) colorLabel(c, fmt(hi - (hi - lo) * k / 4), 890, top + k * h / 4 + 4);
+  if(range&&!canvas.clientWidth)text(c,`Color: ${range.mode==='auto'?'Auto':'Manual'} · ${fmt(lo)} to ${fmt(hi)} ${unit}`,450,520,'center');
   if (profile !== null) {const yy = top + (1 - profile / (rows - 1)) * h; c.setLineDash([7, 5]); line(c, left, yy, left + w, yy, '#ffffff'); c.setLineDash([]); line(c, left, yy + 2, left + w, yy + 2, '#263545');}
   canvas._plotArea = {left, top, w, h, cols, rows, dx};
   if(lines.length||cacheOverlay){const background=document.createElement('canvas');background.width=canvas.width;background.height=canvas.height;background.getContext('2d').drawImage(canvas,0,0);canvas._surfaceBackground=background;drawProfileLines(canvas,lines);}
@@ -67,7 +69,7 @@ export function surface3d(canvas, result, {azimuth = -0.7, elevation = 0.65, lim
   const c = setup(canvas), {surface: z, cols, rows, dx} = result;
   const resolved=range??surfaceColorRange(z,limit),lo=resolved.min,hi=resolved.max,center=(lo+hi)/2,half=(hi-lo)/2;
   const maxSpan = Math.max(cols - 1, rows - 1) * dx;
-  const project = (x, y, h) => {const xx = (x / (cols - 1) - 0.5) * (cols - 1) * dx / maxSpan, yy = (y / (rows - 1) - 0.5) * (rows - 1) * dx / maxSpan, a = xx * Math.cos(azimuth) - yy * Math.sin(azimuth), b = xx * Math.sin(azimuth) + yy * Math.cos(azimuth); return [450 + a * 540, 250 - (b * Math.sin(elevation) + (h-center) / half * 0.18 * Math.cos(elevation)) * 340, b];};
+  const project = (x, y, h) => {const xx = (x / (cols - 1) - 0.5) * (cols - 1) * dx / maxSpan, yy = (y / (rows - 1) - 0.5) * (rows - 1) * dx / maxSpan, a = xx * Math.cos(azimuth) - yy * Math.sin(azimuth), b = xx * Math.sin(azimuth) + yy * Math.cos(azimuth); return [450 + a * 480, 250 - (b * Math.sin(elevation) + (h-center) / half * 0.18 * Math.cos(elevation)) * 340, b];};
   const step = Math.max(1, Math.ceil(Math.max(cols, rows) / 90)), faces = [];
   for (let y = 0; y < rows - 1; y += step) for (let x = 0; x < cols - 1; x += step) {
     const x1 = Math.min(x + step, cols - 1), y1 = Math.min(y + step, rows - 1), corners = [[x, y], [x1, y], [x1, y1], [x, y1]], heights = corners.map(([xx, yy]) => z[yy * cols + xx]);
@@ -80,9 +82,9 @@ export function surface3d(canvas, result, {azimuth = -0.7, elevation = 0.65, lim
   const o = project(0, 0, lo), x = project(cols - 1, 0, lo), y = project(0, rows - 1, lo), h = project(0, 0, hi);
   [x, y, h].forEach(p => line(c, ...o.slice(0, 2), ...p.slice(0, 2), '#8797a9'));
   text(c, 'x', Math.max(25, Math.min(875, x[0])), Math.min(480, x[1] + 22), 'center'); text(c, 'y', Math.max(25, Math.min(875, y[0])), Math.min(480, y[1] + 22), 'center'); text(c, 'z', Math.max(25, h[0] - 12), Math.max(40, h[1] - 12), 'center');
-  text(c, `x: ${fmt((cols - 1) * dx)} µm   /   y: ${fmt((rows - 1) * dx)} µm   /   z: ${fmt(lo)} to ${fmt(hi)} nm`, 450, 24, 'center');
-  text(c, `3D preview · z scale is exaggerated · Color: ${resolved.mode==='auto'?'Auto':'Manual'}`, 450, 519, 'center');
-  for(let k=0;k<260;k++){c.fillStyle=`rgb(${color(hi-(hi-lo)*k/260,lo,hi,false,colormap)})`;c.fillRect(820,110+k,16,1);}text(c,'nm',828,95,'center');for(let k=0;k<=4;k++)text(c,fmt(hi-(hi-lo)*k/4),842,114+k*65);
+  if(!canvas.clientWidth)text(c, `x: ${fmt((cols - 1) * dx)} µm   /   y: ${fmt((rows - 1) * dx)} µm   /   z: ${fmt(lo)} to ${fmt(hi)} nm`, 450, 24, 'center');
+  if(!canvas.clientWidth)text(c, `3D preview · z scale is exaggerated · Color: ${resolved.mode==='auto'?'Auto':'Manual'}`, 450, 519, 'center');
+  for(let k=0;k<260;k++){c.fillStyle=`rgb(${color(hi-(hi-lo)*k/260,lo,hi,false,colormap)})`;c.fillRect(780,110+k,16,1);}text(c,'nm',788,95,'center');for(let k=0;k<=4;k++)colorLabel(c,fmt(hi-(hi-lo)*k/4),890,114+k*65,88);
 }
 
 function frame(c, {xmin, xmax, ymin, ymax, log = false, xlabel, ylabel}) {
@@ -128,7 +130,7 @@ export function seriesChart(canvas, series, {xlabel='Distance along line [µm]',
   if(xmin>=xmax||ymin>=ymax)throw new Error('軸の min は max より小さくしてください。');
   const c=setup(canvas,900,540+(named.length?Math.ceil(named.length/3)*22:0));
   const f=frame(c,{xmin,xmax,ymin,ymax,xlabel,ylabel,log});series.forEach((s,i)=>curve(c,s.x,s.y,f,s.color??palette[i%palette.length],2,log));
-  named.forEach((s,i)=>{const x=65+(i%3)*280,y=537+Math.floor(i/3)*22;c.setLineDash([]);line(c,x,y-4,x+25,y-4,s.color??palette[i%palette.length]);c.setLineDash([]);text(c,s.name.length>32?s.name.slice(0,30)+'…':s.name,x+34,y);});
+  named.forEach((s,i)=>{const x=65+(i%3)*280,y=537+Math.floor(i/3)*22;c.setLineDash([]);line(c,x,y-4,x+25,y-4,s.color??palette[i%palette.length]);c.setLineDash([]);let label=s.name;while(label.length>1&&c.measureText(label+'…').width>218)label=label.slice(0,-1);text(c,label===s.name?label:label+'…',x+34,y);});
   canvas._seriesArea={left:92,top:35,w:740,h:408,xmin,xmax,ymin,ymax,log};
 }
 export function drawMeasurement(canvas,points,{profile=false,caption=''}={}) {
@@ -138,7 +140,7 @@ export function drawMeasurement(canvas,points,{profile=false,caption=''}={}) {
   c.save();c.beginPath();c.rect(a.left,a.top,a.w,a.h);c.clip();c.strokeStyle='#d01858';c.fillStyle='#d01858';c.lineWidth=2;
   const coords=points.map(p=>({x:profile?p.distance:p.x,y:profile?p.height:p.y}));
   if(coords.length===2&&coords.every(p=>Number.isFinite(p.y))){c.beginPath();c.moveTo(X(coords[0].x),Y(coords[0].y));c.lineTo(X(coords[1].x),Y(coords[1].y));c.stroke();}
-  coords.forEach((p,i)=>{if(!Number.isFinite(p.y)){if(profile){line(c,X(p.x),a.top,X(p.x),a.top+a.h,'#d01858');text(c,`${i?'B':'A'} (missing)`,X(p.x)+5,a.top+15,'left','#d01858');}return;}const x=X(p.x),y=Y(p.y);c.beginPath();c.arc(x,y,5,0,2*Math.PI);c.fill();c.strokeStyle='white';c.stroke();text(c,i?'B':'A',x+8,y-8,'left','#d01858');c.strokeStyle='#d01858';});c.restore();if(caption)text(c,caption,450,19,'center','#b61650');
+  coords.forEach((p,i)=>{if(!Number.isFinite(p.y)){if(profile){line(c,X(p.x),a.top,X(p.x),a.top+a.h,'#d01858');text(c,`${i?'B':'A'} (missing)`,X(p.x)+5,a.top+15,'left','#d01858');}return;}const x=X(p.x),y=Y(p.y);c.beginPath();c.arc(x,y,5,0,2*Math.PI);c.fill();c.strokeStyle='white';c.stroke();text(c,i?'B':'A',x+8,y-8,'left','#d01858');c.strokeStyle='#d01858';});c.restore();if(caption)text(c,caption,450,27,'center','#b61650');
 }
 export function histogramChart(canvas,distribution) {
   const c=setup(canvas),step=distribution.centers.length>1?distribution.centers[1]-distribution.centers[0]:1,xmin=distribution.centers[0]-step/2,xmax=distribution.centers.at(-1)+step/2,ymax=Math.max(...distribution.counts)*1.1||1,f=frame(c,{xmin,xmax,ymin:0,ymax,xlabel:'Height before clipping [nm]',ylabel:'Pixel count'});
@@ -154,14 +156,14 @@ export function drawProfileLines(canvas, lines, roi=null) {
   for(const q of lines){c.lineWidth=1.8*scale;line(c,X(q.x0),Y(q.y0),X(q.x1),Y(q.y1),'#ffffffb0');c.lineWidth=0.9*scale;line(c,X(q.x0),Y(q.y0),X(q.x1),Y(q.y1),q.color??teal);text(c,q.name??'',X(q.x0)+4,Y(q.y0)-7,'left',q.color??teal);
     if(q.direction==='arbitrary'||(q.x0!==q.x1&&q.y0!==q.y1)){c.fillStyle=q.color??teal;for(const [x,y] of [[q.x0,q.y0],[q.x1,q.y1]]){c.beginPath();c.arc(X(x),Y(y),2.5*scale,0,Math.PI*2);c.fill();}}
   }
-  if(roi){c.lineWidth=1.5*scale;c.strokeStyle='#087fa8';c.setLineDash([]);c.strokeRect(X(roi.x0),Y(roi.y1),X(roi.x1)-X(roi.x0),Y(roi.y0)-Y(roi.y1));text(c,roi.applied?'Plane fit ROI (applied)':'ROI selection (not applied)',X(roi.x0)+4,Y(roi.y1)-7,'left','#087fa8');}
+  if(roi){c.lineWidth=1.5*scale;c.strokeStyle='#087fa8';c.setLineDash([]);c.strokeRect(X(roi.x0),Y(roi.y1),X(roi.x1)-X(roi.x0),Y(roi.y0)-Y(roi.y1));text(c,roi.applied?'基準範囲 · 適用済み':'基準範囲 · 未適用',X(roi.x0)+4,Y(roi.y1)-7,'left','#087fa8');}
   c.restore();
 }
 
 const fftNumber=v=>v===0?'0':Math.abs(v)<.001||Math.abs(v)>=1e4?v.toExponential(2):Number(v.toFixed(4)).toString();
 export function fftMap(canvas,s,display,{view,wavelengths=[],colormap='viridis',unit='log₁₀(nm²·µm²)',label='2D PSD'}={}) {
   const c=setup(canvas,900,600),cols=s.fx.length,rows=s.fy.length,full=spectrumBounds(s);
-  const maxW=685,maxH=390,spanX=view.xmax-view.xmin,spanY=view.ymax-view.ymin,scale=Math.min(maxW/spanX,maxH/spanY),w=spanX*scale,h=spanY*scale,left=75+(maxW-w)/2,top=35+(maxH-h)/2;
+  const maxW=630,maxH=390,spanX=view.xmax-view.xmin,spanY=view.ymax-view.ymin,scale=Math.min(maxW/spanX,maxH/spanY),w=spanX*scale,h=spanY*scale,left=75+(maxW-w)/2,top=35+(maxH-h)/2;
   const X=x=>left+(x-view.xmin)*scale,Y=y=>top+(view.ymax-y)*scale;
   const off=document.createElement('canvas');off.width=cols;off.height=rows;const cc=off.getContext('2d'),pixels=cc.createImageData(cols,rows);
   for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){const rgb=color(display.values[(rows-1-y)*cols+x],display.min,display.max,false,colormap);pixels.data.set([...rgb,255],4*(y*cols+x));}cc.putImageData(pixels,0,0);
@@ -176,15 +178,18 @@ export function fftMap(canvas,s,display,{view,wavelengths=[],colormap='viridis',
     const radius=scale/lambda;
     for(const [stroke,width] of [['#243346aa',1.8],['#ffffffd9',.7]]){c.strokeStyle=stroke;c.lineWidth=width*screenScale;c.beginPath();c.arc(X(0),Y(0),radius,0,2*Math.PI);c.stroke();}
   }c.restore();
-  c.font='13px sans-serif';c.strokeStyle='#c7d2db';c.strokeRect(left,top,w,h);
+  c.strokeStyle='#c7d2db';c.strokeRect(left,top,w,h);
   const symmetric=view.mode!=='full';
-  for(let k=0;k<=4;k++){const t=k/4,x=symmetric?view.xmin+t*spanX:s.fx[0]+t*(s.fx.at(-1)-s.fx[0]),y=symmetric?view.ymin+t*spanY:s.fy[0]+t*(s.fy.at(-1)-s.fy[0]);text(c,fftNumber(x),X(x),top+h+23,'center');text(c,fftNumber(y),left-12,Y(y)+4,'right');}
-  text(c,'fx [cycles/µm]',left+w/2,top+h+50,'center');c.save();c.translate(left-58,top+h/2);c.rotate(-Math.PI/2);text(c,'fy [cycles/µm]',0,0,'center');c.restore();
-  const barX=804;for(let k=0;k<h;k++){c.fillStyle=`rgb(${color(display.max-(display.max-display.min)*k/h,display.min,display.max,false,colormap)})`;c.fillRect(barX,top+k,16,1);}text(c,unit,barX+8,top-12,'center');for(let k=0;k<=4;k++)text(c,fmt(display.max-(display.max-display.min)*k/4),barX+22,top+k*h/4+4);
+  const ticks=canvas.clientWidth&&canvas.clientWidth<600?2:4;
+  for(let k=0;k<=ticks;k++){const t=k/ticks,x=k===ticks/2&&view.xmin<0&&view.xmax>0?0:symmetric?view.xmin+t*spanX:s.fx[0]+t*(s.fx.at(-1)-s.fx[0]),y=k===ticks/2&&view.ymin<0&&view.ymax>0?0:symmetric?view.ymin+t*spanY:s.fy[0]+t*(s.fy.at(-1)-s.fy[0]);text(c,fftNumber(x),X(x),top+h+23,'center');text(c,fftNumber(y),left-12,Y(y)+4,'right');}
+  text(c,'fx [cycles/µm]',left+w/2,top+h+65,'center');c.save();c.translate(23,top+h/2);c.rotate(-Math.PI/2);text(c,'fy [cycles/µm]',0,0,'center');c.restore();
+  const barX=744;for(let k=0;k<h;k++){c.fillStyle=`rgb(${color(display.max-(display.max-display.min)*k/h,display.min,display.max,false,colormap)})`;c.fillRect(barX,top+k,16,1);}text(c,unit,890,top-18,'right');for(let k=0;k<=4;k++)colorLabel(c,fmt(display.max-(display.max-display.min)*k/4),890,top+k*h/4+4);
+  if(canvas.clientWidth){text(c,`${label} · ${view.mode==='full'?'全域':'中心拡大'}`,450,537,'center');text(c,`Δf X ${fftNumber(s.dfX)} / Y ${fftNumber(s.dfY)} 1/µm`,450,576,'center');}else{
   text(c,`${label} · fx ${fftNumber(view.xmin)} to ${fftNumber(view.xmax)} / fy ${fftNumber(view.ymin)} to ${fftNumber(view.ymax)} cycles/µm`,450,514,'center');
   text(c,`Δfx ${fftNumber(s.dfX)} / Δfy ${fftNumber(s.dfY)} cycles/µm · Original FFT bins · Equal frequency scale on X/Y`,450,538,'center');
   text(c,`Color ${fftNumber(display.min)} to ${fftNumber(display.max)} ${unit} · ${display.manual?`min ${display.minAuto?'Auto':'Manual'} / max ${display.maxAuto?'Auto':'Manual'}`:'Auto, full spectrum'} · Window ${s.window}`,450,560,'center');
   text(c,wavelengths.length?`Visible rings, outer to inner: ${visibleRings.map(fftNumber).join(', ')||'none'} µm${visibleRings.length<wavelengths.length?' (other rings outside view)':''}`:'Wavelength rings: off',450,582,'center');
+  }
   canvas._fftArea={left,top,w,h,view};const background=document.createElement('canvas');background.width=canvas.width;background.height=canvas.height;background.getContext('2d').drawImage(canvas,0,0);canvas._fftBackground=background;
 }
 export function drawFFTProbe(canvas,sample=null) {

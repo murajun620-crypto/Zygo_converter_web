@@ -1,4 +1,4 @@
-import {renderExamples} from './help-examples.js?v=metrology-ui-2';
+import {renderExamples} from './help-examples.js?v=clean-ui-1';
 
 export const topics = {
   surface: ['表面マップ・3D形状',

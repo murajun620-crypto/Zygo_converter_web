@@ -1,6 +1,6 @@
-import {paletteRGB} from './charts.js?v=metrology-ui-2';
+import {paletteRGB} from './charts.js?v=clean-ui-1';
 import {computePSD, surfaceStats, prepareSurface, slope} from './analysis.js';
-import {spectrum2D, extractProfile, filterSurface, heightDistribution, bandRMS, frequencyBands} from './advanced.js?v=frequency-bands-2';
+import {spectrum2D, extractProfile, filterSurface, heightDistribution, bandRMS, frequencyBands} from './advanced.js?v=clean-ui-1';
 
 // Educational surfaces are generated locally and use the same numerical routines as DAT analysis.
 export const COLS = 320, ROWS = 240, DX = 2.5, SCRATCH_DX = 1.25;

@@ -17,6 +17,16 @@ export function profilePoint(profile,distance){
   const i=lo>0&&Math.abs(profile.distance[lo-1]-distance)<Math.abs(profile.distance[lo]-distance)?lo-1:lo;
   return {index:i,distance:profile.distance[i],height:profile.height[i]};
 }
+export function versionFromHTML(html){
+  const tag=(String(html).match(/<meta\b[^>]*>/gi)??[]).find(t=>/\bname\s*=\s*["']app-version["']/i.test(t));
+  const version=tag?.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+  if(!version||!/^[a-z0-9][a-z0-9._-]{0,79}$/i.test(version))throw Error('更新情報を確認できませんでした。');
+  return version;
+}
+export function updateURL(current,version){
+  if(!/^[a-z0-9][a-z0-9._-]{0,79}$/i.test(version))throw Error('更新情報が不正です。');
+  const url=new URL('./',current);url.searchParams.set('v',version);return url.href;
+}
 export function lineDirection(p) {
   return Math.abs(p.y1-p.y0)<1e-8 ? 'x' : Math.abs(p.x1-p.x0)<1e-8 ? 'y' : 'arbitrary';
 }
